@@ -137,6 +137,7 @@ export interface Ticket {
   description: string;
   status: 'Open' | 'Reviewed' | 'Resolved';
   createdAt: string;
+  priority: 'Low' | 'Medium' | 'High' | 'Urgent';
 }
 
 export interface LogEntry {

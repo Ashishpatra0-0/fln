@@ -237,7 +237,7 @@ async function startServer() {
     const user = getAuthUser(req);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { type, subject, description } = req.body;
+    const { type, subject, description, priority } = req.body;
     if (type === 'curriculum' && user.role !== UserRole.TEACHER && user.role !== UserRole.VOLUNTEER) {
       return res.status(400).json({ error: 'Curriculum feedback can only be submitted by Teachers or Volunteers.' });
     }
@@ -249,6 +249,7 @@ async function startServer() {
       userName: user.name,
       userRole: user.role,
       type: type || 'general',
+      priority: priority || 'Medium',
       subject,
       description,
       status: 'Open',
@@ -517,7 +518,7 @@ async function startServer() {
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
     const students = await dbStore.getStudents();
-    
+
     // Mask Aadhar for non-Superadmins (§13.2 R-6)
     const maskedStudents = students.map(s => {
       if (user.role !== UserRole.SUPERADMIN) {
@@ -567,7 +568,7 @@ async function startServer() {
     if (rawAadhar.length < 4) {
       return res.status(400).json({ error: 'Invalid identity document.' });
     }
-    
+
     // Enforce uniqueness check on raw Aadhar number
     const studentsListForDuplicateCheck = await dbStore.getStudents();
     const isDuplicate = studentsListForDuplicateCheck.some(s => s.aadharMasked === rawAadhar);
@@ -706,7 +707,7 @@ async function startServer() {
       if (!Array.isArray(students) || students.length === 0) {
         return res.status(400).json({ success: false, error: 'students must be a non-empty array.' });
       }
-      
+
       const result = await generateDiagnosticPaper({
         classNumber: Number(classNumber),
         students: students.map((s: any) => ({ ...s, studentId: s.studentId || s.id || s.rollNo }))
@@ -823,7 +824,7 @@ async function startServer() {
       if (fs.existsSync(evalReportPath)) {
         const evalData = JSON.parse(fs.readFileSync(evalReportPath, 'utf-8'));
         score = evalData.total_questions - (evalData.wrong_count || 0);
-        
+
         const levelStr = String(evalData.demonstrated_level || '1');
         const lvlMatch = levelStr.match(/\d+/);
         if (lvlMatch) {
@@ -1023,10 +1024,10 @@ async function startServer() {
     // Setup strict Timing Windows (§1.4 Sequential timings)
     const now = new Date();
     const todayStr = now.toISOString().split('T')[0];
-    
+
     // Check if other worksheets exist for the same school on the same day to make print windows sequential & non-overlapping
     const sameDayWorksheets = existingWorksheets.filter(w => w.schoolId === classObj.schoolId && w.date === todayStr);
-    
+
     let printStart = new Date(now.getTime());
     if (sameDayWorksheets.length > 0) {
       // Find the latest printWindowEnd

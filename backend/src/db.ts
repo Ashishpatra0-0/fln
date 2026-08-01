@@ -21,6 +21,7 @@ export const connectDB = async () => {
     process.exit(1);
   }
   try {
+    console.log("Connecting to URI:", uri);
     mongoClient = new MongoClient(uri);
     await mongoClient.connect();
     console.log("MongoDB Connected");
@@ -190,6 +191,7 @@ export interface Ticket {
   userName: string;
   userRole: UserRole;
   type: 'general' | 'curriculum';
+  priority: 'Low' | 'Medium' | 'High' | 'Urgent';
   subject: string;
   description: string;
   status: 'Open' | 'Reviewed' | 'Resolved';
@@ -328,7 +330,7 @@ export class DBStore {
       console.log('No MongoDB — falling back to file-based DB');
       try {
         await fs.mkdir(DB_DIR, { recursive: true });
-      } catch (_) {}
+      } catch (_) { }
       try {
         const content = await fs.readFile(DB_FILE, 'utf-8');
         this.data = JSON.parse(content);
