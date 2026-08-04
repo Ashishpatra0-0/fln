@@ -21,6 +21,7 @@ export const connectDB = async () => {
     process.exit(1);
   }
   try {
+    console.log("Connecting to URI:", uri);
     mongoClient = new MongoClient(uri);
     await mongoClient.connect();
     console.log("MongoDB Connected");
@@ -205,6 +206,7 @@ export interface Ticket {
   userName: string;
   userRole: UserRole;
   type: 'general' | 'curriculum';
+  priority: 'Low' | 'Medium' | 'High' | 'Urgent';
   subject: string;
   description: string;
   status: 'Open' | 'Reviewed' | 'Resolved';
@@ -264,6 +266,8 @@ export interface Intervention {
   isPromoted: boolean;
   promotedAt?: string;
   createdAt: string;
+  teacherNotes?: string;
+  linkedWorksheetIds?: string[];
 }
 
 export interface BestPractice {
@@ -282,6 +286,7 @@ export interface BestPractice {
   tags: string[];
   viewCount: number;
   createdAt: string;
+  linkedWorksheetIds?: string[];
 }
 
 interface DatabaseSchema {
@@ -343,7 +348,7 @@ export class DBStore {
       console.log('No MongoDB — falling back to file-based DB');
       try {
         await fs.mkdir(DB_DIR, { recursive: true });
-      } catch (_) {}
+      } catch (_) { }
       try {
         const content = await fs.readFile(DB_FILE, 'utf-8');
         this.data = JSON.parse(content);
@@ -2294,6 +2299,7 @@ export class DBStore {
         userName: 'Ritu Sharma',
         userRole: UserRole.TEACHER,
         type: 'curriculum',
+        priority: 'High',
         subject: 'Ambiguous wording in Level 3 patterns question',
         description: 'The shapes used in the patterns question of Level 3 are hard for Class 2 children to identify. Recommend replacing with simpler fruit SVGs.',
         status: 'Open',
@@ -2306,6 +2312,7 @@ export class DBStore {
         userName: 'Meena Kumari',
         userRole: UserRole.TEACHER,
         type: 'curriculum',
+        priority: 'Medium',
         subject: 'Measurement Level 3 cuts question difficulty',
         description: 'The pencil cutting subtraction is highly appropriate but students need concrete centimeter rulers to visualize better. Can we suggest visual graphics?',
         status: 'Reviewed',
@@ -2318,6 +2325,7 @@ export class DBStore {
         userName: 'Harpreet Kaur',
         userRole: UserRole.TEACHER,
         type: 'general',
+        priority: 'Urgent',
         subject: 'Delay in receiving printed worksheets for Bathinda school',
         description: 'The printed worksheets for Class 3 students in Bathinda have not arrived. Please check logistics.',
         status: 'Open',
@@ -2330,6 +2338,7 @@ export class DBStore {
         userName: 'Kavita Sharma',
         userRole: UserRole.TEACHER,
         type: 'curriculum',
+        priority: 'High',
         subject: 'Level 8 subtraction questions too advanced for Class 2',
         description: 'Some students placed at Level 8 are struggling with subtraction with borrowing. Suggest revisiting the difficulty curve.',
         status: 'Reviewed',
@@ -2342,6 +2351,7 @@ export class DBStore {
         userName: 'Rahul Kumar',
         userRole: UserRole.VOLUNTEER,
         type: 'general',
+        priority: 'Urgent',
         subject: 'Volunteer access to diagnostic tools in Moga village',
         description: 'Unable to generate diagnostic worksheets for students at GPS Rural Village Moga. Access restricted.',
         status: 'Open',

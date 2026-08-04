@@ -46,6 +46,19 @@ async function startServer() {
   const app = express();
   app.use(express.json());
 
+  // Converts an intervention's duration string (e.g. "2 weeks", "1 month") into
+  // a number of days, so we can calculate exactly when a reassessment is due.
+  function parseDurationToDays(duration: string): number {
+    const match = duration.match(/(\d+)\s*(day|week|month)/i);
+    if (!match) return 14; // safe fallback default
+    const num = parseInt(match[1], 10);
+    const unit = match[2].toLowerCase();
+    if (unit === 'day') return num;
+    if (unit === 'week') return num * 7;
+    if (unit === 'month') return num * 30;
+    return 14;
+  }
+
   // Serve Puppeteer output PDF sheets statically
   app.use('/output', express.static(path.join(ROOT_DIR, 'output')));
   app.use('/worksheets', express.static(path.join(ROOT_DIR, 'public', 'worksheets')));
@@ -147,7 +160,7 @@ async function startServer() {
     const user = getAuthUser(req);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { type, subject, description } = req.body;
+    const { type, subject, description, priority } = req.body;
     if (type === 'curriculum' && user.role !== UserRole.TEACHER && user.role !== UserRole.VOLUNTEER) {
       return res.status(400).json({ error: 'Curriculum feedback can only be submitted by Teachers or Volunteers.' });
     }
@@ -159,6 +172,7 @@ async function startServer() {
       userName: user.name,
       userRole: user.role,
       type: type || 'general',
+      priority: priority || 'Medium',
       subject,
       description,
       status: 'Open',
@@ -544,7 +558,7 @@ async function startServer() {
     if (rawAadhar.length < 4) {
       return res.status(400).json({ error: 'Invalid identity document.' });
     }
-    
+
     // Enforce uniqueness check on raw Aadhar number
     const studentsListForDuplicateCheck = await dbStore.getStudents();
     const isDuplicate = studentsListForDuplicateCheck.some(s => s.aadharMasked === rawAadhar);
@@ -730,7 +744,7 @@ async function startServer() {
       if (!Array.isArray(students) || students.length === 0) {
         return res.status(400).json({ success: false, error: 'students must be a non-empty array.' });
       }
-      
+
       const result = await generateDiagnosticPaper({
         classNumber: Number(classNumber),
         students: students.map((s: any) => ({ ...s, studentId: s.studentId || s.id || s.rollNo }))
@@ -847,7 +861,7 @@ async function startServer() {
       if (fs.existsSync(evalReportPath)) {
         const evalData = JSON.parse(fs.readFileSync(evalReportPath, 'utf-8'));
         score = evalData.total_questions - (evalData.wrong_count || 0);
-        
+
         const levelStr = String(evalData.demonstrated_level || '1');
         const lvlMatch = levelStr.match(/\d+/);
         if (lvlMatch) {
@@ -1047,10 +1061,10 @@ async function startServer() {
     // Setup strict Timing Windows (§1.4 Sequential timings)
     const now = new Date();
     const todayStr = now.toISOString().split('T')[0];
-    
+
     // Check if other worksheets exist for the same school on the same day to make print windows sequential & non-overlapping
     const sameDayWorksheets = existingWorksheets.filter(w => w.schoolId === classObj.schoolId && w.date === todayStr);
-    
+
     let printStart = new Date(now.getTime());
     if (sameDayWorksheets.length > 0) {
       // Find the latest printWindowEnd
@@ -2252,7 +2266,8 @@ async function startServer() {
         intervention.className
       ],
       viewCount: 0,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      linkedWorksheetIds: intervention.linkedWorksheetIds || []
     };
 
     await dbStore.addBestPractice(bp);
@@ -2271,6 +2286,213 @@ async function startServer() {
       details: `BEST PRACTICE: Teacher ${user.name} promoted intervention for ${intervention.studentName} to Best Practices Repository`
     });
     res.json(bp);
+  });
+
+  // Trigger reassessment for an intervention — this is the first place in the
+  // codebase that actually sets/uses the 'pending_review' status (previously
+  // defined in the type but never assigned anywhere).
+  app.post('/api/interventions/:id/trigger-reassessment', async (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const interventions = await dbStore.getInterventions();
+    const intervention = interventions.find(i => i.id === req.params.id);
+    if (!intervention) return res.status(404).json({ error: 'Intervention not found.' });
+
+    const canTrigger = intervention.teacherId === user.id ||
+      [UserRole.SUPERADMIN, UserRole.ADMIN, UserRole.DISTRICT_ADMIN, UserRole.BLOCK_ADMIN, UserRole.SCHOOL].includes(user.role);
+    if (!canTrigger) return res.status(403).json({ error: 'Forbidden.' });
+
+    if (intervention.status === 'pending_review') {
+      return res.status(400).json({ error: 'Reassessment has already been triggered for this intervention.' });
+    }
+    if (intervention.status === 'completed') {
+      return res.status(400).json({ error: 'This intervention is already completed. No reassessment needed.' });
+    }
+
+    // Check if the intervention's planned duration has actually elapsed
+    const durationDays = parseDurationToDays(intervention.duration);
+    const startDate = new Date(intervention.startDate);
+    const dueDate = new Date(startDate.getTime() + durationDays * 24 * 60 * 60 * 1000);
+    const now = new Date();
+    const daysRemaining = Math.ceil((dueDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+
+    if (daysRemaining > 0) {
+      return res.status(400).json({
+        error: `Reassessment is not due yet. ${daysRemaining} day(s) remaining until the planned duration ends.`,
+        daysRemaining
+      });
+    }
+
+    // Find the student to generate a fresh diagnostic
+    const students = await dbStore.getStudents();
+    const student = students.find(s => s.id === intervention.studentId);
+    if (!student) return res.status(404).json({ error: 'Student not found.' });
+
+    // Reuse the existing question generator to build a small reassessment set,
+    // focused on the intervention's originally weak competencies where possible.
+    const questions = generateQuestionsForLevel(student.currentLevel, student.currentSubLevel || 0);
+
+    // Mark this intervention as awaiting review (activates the previously-unused status)
+    await dbStore.updateIntervention(intervention.id, { status: 'pending_review' });
+
+    await dbStore.addLog({
+      id: 'log_' + randomUUID().slice(0, 8),
+      timestamp: now.toISOString(),
+      schoolId: intervention.schoolId,
+      schoolName: '',
+      userId: user.id,
+      userEmail: user.email,
+      userRole: user.role,
+      activityType: 'verify',
+      status: 'Success',
+      details: `REASSESSMENT TRIGGERED: Intervention ${intervention.id} for ${intervention.studentName} marked pending review after planned duration elapsed.`
+    });
+
+    res.json({
+      success: true,
+      message: 'Reassessment triggered. Student is now awaiting a follow-up assessment.',
+      intervention: { ...intervention, status: 'pending_review' },
+      reassessmentQuestions: questions
+    });
+  });
+
+  // Suggest worksheets for an intervention by matching question topics against
+  // the intervention's weak competencies. This is a real ranking/matching
+  // engine — not just a static list — scoring each worksheet by how many of
+  // its questions target the specific competencies this student is struggling with.
+  app.get('/api/interventions/:id/suggested-worksheets', async (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const interventions = await dbStore.getInterventions();
+    const intervention = interventions.find(i => i.id === req.params.id);
+    if (!intervention) return res.status(404).json({ error: 'Intervention not found.' });
+
+    const worksheets = await dbStore.getWorksheets();
+    const weakCompetenciesLower = intervention.weakCompetencies.map(c => c.toLowerCase());
+
+    const scored = worksheets.map(ws => {
+      // Count how many questions in this worksheet touch on the intervention's
+      // weak competencies, matching against both 'topic' and 'subtopic' fields.
+      const matchingQuestions = ws.questions.filter(q => {
+        const topicLower = (q.topic || '').toLowerCase();
+        const subtopicLower = (q.subtopic || '').toLowerCase();
+        return weakCompetenciesLower.some(comp =>
+          topicLower.includes(comp) || comp.includes(topicLower) ||
+          subtopicLower.includes(comp) || comp.includes(subtopicLower)
+        );
+      });
+
+      const matchScore = ws.questions.length > 0
+        ? Math.round((matchingQuestions.length / ws.questions.length) * 100)
+        : 0;
+
+      return {
+        worksheetId: ws.id,
+        className: ws.className,
+        section: ws.section,
+        cycle: ws.cycle,
+        date: ws.date,
+        totalQuestions: ws.questions.length,
+        matchingQuestionsCount: matchingQuestions.length,
+        matchScore,
+        alreadyLinked: (intervention.linkedWorksheetIds || []).includes(ws.id)
+      };
+    })
+      .filter(w => w.matchScore > 0) // only show worksheets with at least some relevance
+      .sort((a, b) => b.matchScore - a.matchScore); // best matches first
+
+    res.json({
+      interventionId: intervention.id,
+      weakCompetencies: intervention.weakCompetencies,
+      suggestions: scored
+    });
+  });
+
+  // Fetch a single worksheet's full content, for teachers reviewing a linked
+  // worksheet from an intervention (or anywhere else that needs a quick look).
+  app.get('/api/worksheets/:id/view', async (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const worksheets = await dbStore.getWorksheets();
+    const ws = worksheets.find(w => w.id === req.params.id);
+    if (!ws) return res.status(404).json({ error: 'Worksheet not found.' });
+
+    const allQuestions = await dbStore.getQuestions();
+
+    res.json({
+      id: ws.id,
+      className: ws.className,
+      section: ws.section,
+      cycle: ws.cycle,
+      date: ws.date,
+      questions: ws.questions.map(q => {
+        // If this question's text looks truncated (ends with "..."), fall back
+        // to the original, complete question text from the master question bank,
+        // matched by topic + subtopic.
+        let displayQuestion = q.question;
+        if (displayQuestion.trim().endsWith('...')) {
+          const original = allQuestions.find(oq => oq.topic === q.topic && oq.subtopic === q.subtopic);
+          if (original) {
+            displayQuestion = original.question;
+          }
+        }
+        return {
+          question: displayQuestion,
+          answer: q.answer,
+          topic: q.topic,
+          subtopic: q.subtopic,
+          difficulty: q.difficulty
+        };
+      })
+    });
+  });
+
+  // Link/unlink a worksheet to an intervention (teacher action after reviewing suggestions)
+  app.patch('/api/interventions/:id/linked-worksheets', async (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { worksheetId, action } = req.body; // action: 'link' | 'unlink'
+    const interventions = await dbStore.getInterventions();
+    const intervention = interventions.find(i => i.id === req.params.id);
+    if (!intervention) return res.status(404).json({ error: 'Intervention not found.' });
+
+    const canEdit = intervention.teacherId === user.id ||
+      [UserRole.SUPERADMIN, UserRole.ADMIN, UserRole.DISTRICT_ADMIN, UserRole.BLOCK_ADMIN, UserRole.SCHOOL].includes(user.role);
+    if (!canEdit) return res.status(403).json({ error: 'Forbidden.' });
+
+    const current = intervention.linkedWorksheetIds || [];
+    let updated: string[];
+    if (action === 'link') {
+      updated = current.includes(worksheetId) ? current : [...current, worksheetId];
+    } else {
+      updated = current.filter(id => id !== worksheetId);
+    }
+
+    const result = await dbStore.updateIntervention(req.params.id, { linkedWorksheetIds: updated });
+    res.json(result);
+  });
+
+  // Update teacher notes on an intervention (collaborative progress notes)
+  app.patch('/api/interventions/:id/notes', async (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { teacherNotes } = req.body;
+    const interventions = await dbStore.getInterventions();
+    const intervention = interventions.find(i => i.id === req.params.id);
+    if (!intervention) return res.status(404).json({ error: 'Intervention not found.' });
+
+    // Only the owning teacher (or admins) can update notes
+    const canEdit = intervention.teacherId === user.id ||
+      [UserRole.SUPERADMIN, UserRole.ADMIN, UserRole.DISTRICT_ADMIN, UserRole.BLOCK_ADMIN, UserRole.SCHOOL].includes(user.role);
+    if (!canEdit) return res.status(403).json({ error: 'Forbidden.' });
+
+    const updated = await dbStore.updateIntervention(req.params.id, { teacherNotes });
+    res.json(updated);
   });
 
   // Search/list Best Practices Repository (all roles)
