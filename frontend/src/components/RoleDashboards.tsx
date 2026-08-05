@@ -2107,9 +2107,8 @@ export const TeacherDashboard: React.FC<DashboardProps> = ({ user, token, onSele
       <div className="flex gap-2 border-b border-zinc-200 dark:border-zinc-700 pb-px">
         <button
           onClick={() => { setShowAllStudents(true); setActiveClass(null); }}
-          className={`px-4 py-2 text-sm font-display font-medium border-b-2 transition-all ${
-            showAllStudents ? 'border-zinc-900 dark:border-white text-zinc-900 dark:text-white font-semibold' : 'border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
-          }`}
+          className={`px-4 py-2 text-sm font-display font-medium border-b-2 transition-all ${showAllStudents ? 'border-zinc-900 dark:border-white text-zinc-900 dark:text-white font-semibold' : 'border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
+            }`}
         >
           All Students ({students.length})
         </button>
@@ -2117,9 +2116,8 @@ export const TeacherDashboard: React.FC<DashboardProps> = ({ user, token, onSele
           <button
             key={c.id}
             onClick={() => { setShowAllStudents(false); setActiveClass(c); }}
-            className={`px-4 py-2 text-sm font-display font-medium border-b-2 transition-all ${
-              !showAllStudents && activeClass?.id === c.id ? 'border-zinc-900 dark:border-white text-zinc-900 dark:text-white font-semibold' : 'border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
-            }`}
+            className={`px-4 py-2 text-sm font-display font-medium border-b-2 transition-all ${!showAllStudents && activeClass?.id === c.id ? 'border-zinc-900 dark:border-white text-zinc-900 dark:text-white font-semibold' : 'border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
+              }`}
           >
             {c.className} - {c.section}
           </button>
@@ -2130,289 +2128,257 @@ export const TeacherDashboard: React.FC<DashboardProps> = ({ user, token, onSele
         <div className="space-y-6">
           {!showAllStudents && activeClass && (
             <>
-          {/* 💊 Intervention Quick Action */}
-          <button
-            onClick={() => onSelectView('interventions')}
-            className="group w-full text-left bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950 dark:to-purple-950 border border-indigo-200 dark:border-indigo-800 rounded-xl p-4 shadow-sm hover:shadow-md hover:border-indigo-300 dark:hover:border-indigo-700 transition cursor-pointer"
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-full bg-indigo-100 dark:bg-indigo-900 flex items-center justify-center text-lg">
-                  💊
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">Intervention Tracking</h3>
-                  <p className="text-[10px] text-slate-500 dark:text-slate-400">Record remedial actions for struggling students</p>
-                </div>
-              </div>
-              <div className="text-[10px] font-mono text-indigo-600 dark:text-indigo-400 bg-white dark:bg-zinc-800 px-3 py-1.5 rounded-full border border-indigo-200 dark:border-indigo-700 font-bold transition-colors duration-200 group-hover:bg-indigo-600 group-hover:text-white group-hover:border-indigo-600 dark:group-hover:bg-indigo-600 dark:group-hover:text-white">
-                View Interventions →
-              </div>
-            </div>
-          </button>
-
-          {/* 📋 Diagnostic Paper Generator */}
-          <div className="bg-white dark:bg-slate-900 border border-zinc-200 dark:border-zinc-700 rounded-xl p-5 shadow-sm space-y-4">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-              <div className="flex items-center gap-4">
-                <div>
-                  <h3 className="font-display font-semibold text-zinc-900 dark:text-white text-sm">📋 Diagnostic Paper Generator</h3>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Generate baseline diagnostic PDFs for students pending placement.</p>
-                </div>
-                <span className="text-xs font-mono font-bold px-2 py-1 rounded bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-                  {classStudents.filter(s => s.levelHistory.length === 0).length} Pending
-                </span>
-              </div>
-              {!bulkJob || bulkJob?.status === 'failed' ? (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const targets = classStudents.length > 0 ? classStudents : [];
-                    if (targets.length === 0) {
-                      alert('No students found in this class.');
-                      return;
-                    }
-                    const classMatch = activeClass?.className.match(/\d+/);
-                    const classNumber = classMatch ? parseInt(classMatch[0], 10) : 2;
-                    setBulkLoading(true);
-                    setBulkError('');
-                    setBulkJob(null);
-                    try {
-                      const res = await apiFetch('/api/diagnostic/bulk', {
-                        method: 'POST',
-                        headers: {
-                          'Content-Type': 'application/json',
-                          'Authorization': `Bearer ${token}`
-                        },
-                        body: JSON.stringify({ classNumber, students: targets.map(s => ({ name: s.name, studentId: s.id })) })
-                      });
-                      const data = await res.json();
-                      if (res.ok) {
-                        setBulkJob({ ...data, total: targets.length, completed: 0, pdfUrl: data.pdfUrl || '', downloadUrl: data.downloadUrl || null, error: '' });
-                      } else {
-                        setBulkError(data.error || 'Failed to start bulk generation.');
-                      }
-                    } catch {
-                      setBulkError('Network error starting bulk generation.');
-                    } finally {
-                      setBulkLoading(false);
-                    }
-                  }}
-                  disabled={bulkLoading}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs font-mono px-4 py-2.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {bulkLoading ? (
-                    <><span className="animate-spin text-sm">⏳</span> Generating...</>
-                  ) : (
-                    <>Generate Diagnostic Papers</>
-                  )}
-                </button>
-              ) : null}
-            </div>
-
-            {/* Generating state */}
-            {bulkLoading && (
-              <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800">
-                <div className="flex items-center gap-3 p-4 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg">
-                  <span className="animate-spin text-xl">⏳</span>
-                  <div>
-                    <p className="text-sm font-semibold text-blue-800 dark:text-blue-200">Generating Diagnostic Papers...</p>
-                    <p className="text-xs text-blue-600 dark:text-blue-400">Please wait while the papers are being generated for {classStudents.filter(s => s.levelHistory.length === 0).length} students.</p>
+              {/* 💊 Intervention Quick Action */}
+              <button
+                onClick={() => onSelectView('interventions')}
+                className="group w-full text-left bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950 dark:to-purple-950 border border-indigo-200 dark:border-indigo-800 rounded-xl p-4 shadow-sm hover:shadow-md hover:border-indigo-300 dark:hover:border-indigo-700 transition cursor-pointer"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full bg-indigo-100 dark:bg-indigo-900 flex items-center justify-center text-lg">
+                      💊
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white">Intervention Tracking</h3>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">Record remedial actions for struggling students</p>
+                    </div>
+                  </div>
+                  <div className="text-[10px] font-mono text-indigo-600 dark:text-indigo-400 bg-white dark:bg-zinc-800 px-3 py-1.5 rounded-full border border-indigo-200 dark:border-indigo-700 font-bold transition-colors duration-200 group-hover:bg-indigo-600 group-hover:text-white group-hover:border-indigo-600 dark:group-hover:bg-indigo-600 dark:group-hover:text-white">
+                    View Interventions →
                   </div>
                 </div>
-              </div>
-            )}
+              </button>
 
-            {/* Bulk job polling & result */}
-            {bulkJob && (
-              <>
-                {/* Poll progress while running */}
-                {bulkJob.status === 'running' && (
+              {/* 📋 Diagnostic Paper Generator */}
+              <div className="bg-white dark:bg-slate-900 border border-zinc-200 dark:border-zinc-700 rounded-xl p-5 shadow-sm space-y-4">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                  <div className="flex items-center gap-4">
+                    <div>
+                      <h3 className="font-display font-semibold text-zinc-900 dark:text-white text-sm">📋 Diagnostic Paper Generator</h3>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Generate baseline diagnostic PDFs for students pending placement.</p>
+                    </div>
+                    <span className="text-xs font-mono font-bold px-2 py-1 rounded bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                      {classStudents.filter(s => s.levelHistory.length === 0).length} Pending
+                    </span>
+                  </div>
+                  {!bulkJob || bulkJob?.status === 'failed' ? (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const targets = classStudents.length > 0 ? classStudents : [];
+                        if (targets.length === 0) {
+                          alert('No students found in this class.');
+                          return;
+                        }
+                        const classMatch = activeClass?.className.match(/\d+/);
+                        const classNumber = classMatch ? parseInt(classMatch[0], 10) : 2;
+                        setBulkLoading(true);
+                        setBulkError('');
+                        setBulkJob(null);
+                        try {
+                          const res = await apiFetch('/api/diagnostic/bulk', {
+                            method: 'POST',
+                            headers: {
+                              'Content-Type': 'application/json',
+                              'Authorization': `Bearer ${token}`
+                            },
+                            body: JSON.stringify({ classNumber, students: targets.map(s => ({ name: s.name, studentId: s.id })) })
+                          });
+                          const data = await res.json();
+                          if (res.ok) {
+                            setBulkJob({ ...data, total: targets.length, completed: 0, pdfUrl: data.pdfUrl || '', downloadUrl: data.downloadUrl || null, error: '' });
+                          } else {
+                            setBulkError(data.error || 'Failed to start bulk generation.');
+                          }
+                        } catch {
+                          setBulkError('Network error starting bulk generation.');
+                        } finally {
+                          setBulkLoading(false);
+                        }
+                      }}
+                      disabled={bulkLoading}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs font-mono px-4 py-2.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {bulkLoading ? (
+                        <><span className="animate-spin text-sm">⏳</span> Generating...</>
+                      ) : (
+                        <>Generate Diagnostic Papers</>
+                      )}
+                    </button>
+                  ) : null}
+                </div>
+
+                {/* Generating state */}
+                {bulkLoading && (
                   <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800">
                     <div className="flex items-center gap-3 p-4 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg">
                       <span className="animate-spin text-xl">⏳</span>
                       <div>
                         <p className="text-sm font-semibold text-blue-800 dark:text-blue-200">Generating Diagnostic Papers...</p>
-                        <p className="text-xs text-blue-600 dark:text-blue-400">{bulkJob.completed} / {bulkJob.total} papers generated</p>
+                        <p className="text-xs text-blue-600 dark:text-blue-400">Please wait while the papers are being generated for {classStudents.filter(s => s.levelHistory.length === 0).length} students.</p>
                       </div>
                     </div>
                   </div>
                 )}
 
-                {/* Completed result */}
-                {bulkJob.status === 'completed' && bulkJob.downloadUrl && (
-                  <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800">
-                    <div className="p-4 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg space-y-3">
-                      <div className="flex items-center gap-2">
-                        <span className="text-green-700 dark:text-green-300 font-bold text-sm">✅ {bulkJob.total} Diagnostic Papers Generated Successfully</span>
+                {/* Bulk job polling & result */}
+                {bulkJob && (
+                  <>
+                    {/* Poll progress while running */}
+                    {bulkJob.status === 'running' && (
+                      <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                        <div className="flex items-center gap-3 p-4 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg">
+                          <span className="animate-spin text-xl">⏳</span>
+                          <div>
+                            <p className="text-sm font-semibold text-blue-800 dark:text-blue-200">Generating Diagnostic Papers...</p>
+                            <p className="text-xs text-blue-600 dark:text-blue-400">{bulkJob.completed} / {bulkJob.total} papers generated</p>
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex gap-3">
-                        <a
-                          href={bulkJob.pdfUrl || bulkJob.downloadUrl || '#'}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-mono font-bold px-4 py-2.5 rounded-lg transition-colors cursor-pointer shadow-sm"
-                        >
-                          🖨️ Print / Open PDF ({bulkJob.total} Papers)
-                        </a>
+                    )}
+
+                    {/* Completed result */}
+                    {bulkJob.status === 'completed' && bulkJob.downloadUrl && (
+                      <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                        <div className="p-4 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg space-y-3">
+                          <div className="flex items-center gap-2">
+                            <span className="text-green-700 dark:text-green-300 font-bold text-sm">✅ {bulkJob.total} Diagnostic Papers Generated Successfully</span>
+                          </div>
+                          <div className="flex gap-3">
+                            <a
+                              href={bulkJob.pdfUrl || bulkJob.downloadUrl || '#'}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-mono font-bold px-4 py-2.5 rounded-lg transition-colors cursor-pointer shadow-sm"
+                            >
+                              🖨️ Print / Open PDF ({bulkJob.total} Papers)
+                            </a>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
+                    )}
+
+                    {/* Failed result */}
+                    {bulkJob.status === 'failed' && (
+                      <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                        <div className="p-3 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg">
+                          <p className="text-xs text-red-700 dark:text-red-300 font-medium">❌ Generation Failed: {bulkJob.error || 'Unknown error'}</p>
+                          <button
+                            onClick={() => setBulkJob(null)}
+                            className="mt-2 text-xs text-red-600 underline cursor-pointer"
+                          >
+                            Try Again
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
 
-                {/* Failed result */}
-                {bulkJob.status === 'failed' && (
-                  <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800">
-                    <div className="p-3 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg">
-                      <p className="text-xs text-red-700 dark:text-red-300 font-medium">❌ Generation Failed: {bulkJob.error || 'Unknown error'}</p>
-                      <button
-                        onClick={() => setBulkJob(null)}
-                        className="mt-2 text-xs text-red-600 underline cursor-pointer"
-                      >
-                        Try Again
-                      </button>
-                    </div>
-                  </div>
+                {bulkError && !bulkJob && (
+                  <div className="p-3 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg text-xs text-red-700 dark:text-red-300">⚠️ {bulkError}</div>
                 )}
-              </>
-            )}
-
-            {bulkError && !bulkJob && (
-              <div className="p-3 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg text-xs text-red-700 dark:text-red-300">⚠️ {bulkError}</div>
-            )}
-          </div>
-
-          {/* 📄 Level-Wise Paper Generator — Levels_backend batch pipeline */}
-          <div className="bg-white dark:bg-slate-900 border border-zinc-200 dark:border-slate-700 rounded-xl p-5 shadow-sm space-y-4">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-              <div>
-                <h3 className="font-display font-semibold text-zinc-900 dark:text-white text-sm">📄 Level-Wise Paper Generator</h3>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Generate personalized level-wise question PDFs for placed students via the Levels_backend batch pipeline.</p>
               </div>
-              <div className="flex items-center gap-3">
-                <span className="text-xs font-mono font-bold px-2 py-1 rounded bg-green-50 dark:bg-green-950/40 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800">
-                  {classStudents.filter(s => s.levelHistory.length > 0).length} Placed
-                </span>
-                <button
-                  type="button"
-                  onClick={handleGenerateLevelBatch}
-                  disabled={levelBulkLoading}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs font-mono px-4 py-2.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {levelBulkLoading ? (
-                    <><span className="animate-spin text-sm">⏳</span> Generating...</>
-                  ) : (
-                    <>Generate Batch</>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDownloadLevelBatch}
-                  disabled={!levelBatchId || levelBatchDownloading}
-                  className="bg-zinc-900 hover:bg-zinc-800 text-white font-semibold text-xs font-mono px-4 py-2.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                  title={levelBatchId ? 'Download the whole batch as a ZIP (worksheet.pdf + answer_key.json + coords.json per student)' : 'Generate a batch first'}
-                >
-                  {levelBatchDownloading ? (
-                    <><span className="animate-spin text-sm">⏳</span> Downloading...</>
-                  ) : (
-                    <>⬇️ Download Batch ZIP</>
-                  )}
-                </button>
-              </div>
-            </div>
 
-            {levelBatchError && (
-              <div className="p-2 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded text-xs text-red-700 dark:text-red-300">⚠️ {levelBatchError}</div>
-            )}
-
-            {levelBatchId && (
-              <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 space-y-2">
-                <div className="flex justify-between text-xs font-mono text-zinc-500 dark:text-zinc-400">
-                  <span>Batch <span className="text-zinc-800 dark:text-zinc-200 font-semibold">{levelBatchId}</span> — {levelBatchResults.length} file(s) generated</span>
-                  {levelBatchSkipped.length > 0 && (
-                    <span className="text-amber-600 dark:text-amber-400 font-semibold">{levelBatchSkipped.length} skipped</span>
-                  )}
+              {/* 📄 Level-Wise Paper Generator — Levels_backend batch pipeline */}
+              <div className="bg-white dark:bg-slate-900 border border-zinc-200 dark:border-slate-700 rounded-xl p-5 shadow-sm space-y-4">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                  <div>
+                    <h3 className="font-display font-semibold text-zinc-900 dark:text-white text-sm">📄 Level-Wise Paper Generator</h3>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Generate personalized level-wise question PDFs for placed students via the Levels_backend batch pipeline.</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-mono font-bold px-2 py-1 rounded bg-green-50 dark:bg-green-950/40 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800">
+                      {classStudents.filter(s => s.levelHistory.length > 0).length} Placed
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleGenerateLevelBatch}
+                      disabled={levelBulkLoading}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs font-mono px-4 py-2.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {levelBulkLoading ? (
+                        <><span className="animate-spin text-sm">⏳</span> Generating...</>
+                      ) : (
+                        <>Generate Batch</>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDownloadLevelBatch}
+                      disabled={!levelBatchId || levelBatchDownloading}
+                      className="bg-zinc-900 hover:bg-zinc-800 text-white font-semibold text-xs font-mono px-4 py-2.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                      title={levelBatchId ? 'Download the whole batch as a ZIP (worksheet.pdf + answer_key.json + coords.json per student)' : 'Generate a batch first'}
+                    >
+                      {levelBatchDownloading ? (
+                        <><span className="animate-spin text-sm">⏳</span> Downloading...</>
+                      ) : (
+                        <>⬇️ Download Batch ZIP</>
+                      )}
+                    </button>
+                  </div>
                 </div>
-                {levelBatchResults.length > 0 && (
-                  <div className="max-h-40 overflow-y-auto space-y-1">
-                    {levelBatchResults.map((r, i) => (
-                      <div key={`${r.studentId}-${r.sublevelId}-${r.setNum}-${i}`} className="flex items-center justify-between text-xs bg-zinc-50 dark:bg-zinc-800 border border-zinc-100 dark:border-zinc-700 rounded px-2 py-1">
-                        <span className="text-zinc-700 dark:text-zinc-300 font-medium">{r.studentName} <span className="text-zinc-400 dark:text-zinc-500 font-mono">L{r.sublevelId} set{r.setNum}</span></span>
-                        <a href={r.pdfUrl} target="_blank" rel="noreferrer" className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 font-mono font-bold">View PDF</a>
-                      </div>
-                    ))}
-                  </div>
+
+                {levelBatchError && (
+                  <div className="p-2 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded text-xs text-red-700 dark:text-red-300">⚠️ {levelBatchError}</div>
                 )}
-                {levelBatchSkipped.length > 0 && (
-                  <div className="p-2 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded text-xs text-amber-700 dark:text-amber-300">
-                    Skipped: {levelBatchSkipped.map(s => s.reason).join('; ')}
+
+                {levelBatchId && (
+                  <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 space-y-2">
+                    <div className="flex justify-between text-xs font-mono text-zinc-500 dark:text-zinc-400">
+                      <span>Batch <span className="text-zinc-800 dark:text-zinc-200 font-semibold">{levelBatchId}</span> — {levelBatchResults.length} file(s) generated</span>
+                      {levelBatchSkipped.length > 0 && (
+                        <span className="text-amber-600 dark:text-amber-400 font-semibold">{levelBatchSkipped.length} skipped</span>
+                      )}
+                    </div>
+                    {levelBatchResults.length > 0 && (
+                      <div className="max-h-40 overflow-y-auto space-y-1">
+                        {levelBatchResults.map((r, i) => (
+                          <div key={`${r.studentId}-${r.sublevelId}-${r.setNum}-${i}`} className="flex items-center justify-between text-xs bg-zinc-50 dark:bg-zinc-800 border border-zinc-100 dark:border-zinc-700 rounded px-2 py-1">
+                            <span className="text-zinc-700 dark:text-zinc-300 font-medium">{r.studentName} <span className="text-zinc-400 dark:text-zinc-500 font-mono">L{r.sublevelId} set{r.setNum}</span></span>
+                            <a href={r.pdfUrl} target="_blank" rel="noreferrer" className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 font-mono font-bold">View PDF</a>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {levelBatchSkipped.length > 0 && (
+                      <div className="p-2 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded text-xs text-amber-700 dark:text-amber-300">
+                        Skipped: {levelBatchSkipped.map(s => s.reason).join('; ')}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
-            )}
-          </div>
             </>
           )}
 
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-          {/* Class roster table */}
-          <div className="xl:col-span-2 bg-white dark:bg-slate-900 border border-zinc-200 dark:border-slate-700 rounded-xl shadow-sm overflow-hidden">
-            <div className="p-4 border-b border-zinc-150 dark:border-zinc-800 flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-800/50">
-              <h3 className="font-display font-medium text-zinc-900 dark:text-white text-sm">
-                {showAllStudents ? `All Students — School Roster (${classStudents.length})` : `Classroom Student Roster (${classStudents.length})`}
-              </h3>
-              {!showAllStudents && activeClass && (
-              <button
-                onClick={() => setShowWorksheetPortal(true)}
-                className="bg-white dark:bg-slate-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 font-mono text-[10px] font-bold px-3 py-1.5 rounded-lg shadow-sm cursor-pointer hover:border-zinc-400 transition-colors"
-              >
-                Trigger Worksheets Flow
-              </button>
-              )}
-            </div>
-            <div className="p-4">
-              {(() => {
-                const studentColumns: Column<Student>[] = [
-                  { header: 'ID', accessor: 'id', sortKey: 'id', className: 'font-mono text-xs text-slate-400 dark:text-slate-500' },
-                  { header: 'Student Name', accessor: 'name', sortKey: 'name', className: 'font-medium text-slate-900 dark:text-slate-100' },
-                  { header: 'Aadhar / ID No.', accessor: 'aadharMasked', className: 'font-mono text-xs text-slate-500 dark:text-slate-400' },
-                  {
-                    header: 'Current Level',
-                    accessor: (s) => (
-                      <span className="font-mono font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 text-xs">
-                        L{s.currentLevel}.{s.currentSubLevel ?? 0}
-                      </span>
-                    )
-                  },
-                  {
-                    header: 'Target Level',
-                    accessor: (s) => <span className="font-mono text-slate-500 dark:text-slate-400 text-xs">Level {s.targetLevel}</span>
-                  },
-                  {
-                    header: 'Streak',
-                    accessor: (s) => <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">{s.streak} 🔥</span>
-                  },
-                  {
-                    header: 'Diagnostic Status',
-                    accessor: (s) => s.levelHistory.length === 0 ? (
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={() => setDiagnosticStudent(s)}
-                          className="bg-amber-600 hover:bg-amber-700 text-white font-mono text-[10px] font-bold px-2 py-1 rounded cursor-pointer"
-                        >
-                          Run Diagnostic
-                        </button>
-                        <button
-                          onClick={() => setBaselineStudent(s)}
-                          className="bg-indigo-600 hover:bg-indigo-700 text-white font-mono text-[10px] font-bold px-2 py-1 rounded cursor-pointer"
-                        >
-                          Upload Sheet
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <span className="text-green-700 dark:text-green-400 font-mono text-[9px] font-bold uppercase bg-green-50 dark:bg-green-950/40 px-2 py-0.5 rounded border border-green-200 dark:border-green-800">
-                          Placed
+            {/* Class roster table */}
+            <div className="xl:col-span-2 bg-white dark:bg-slate-900 border border-zinc-200 dark:border-slate-700 rounded-xl shadow-sm overflow-hidden">
+              <div className="p-4 border-b border-zinc-150 dark:border-zinc-800 flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-800/50">
+                <h3 className="font-display font-medium text-zinc-900 dark:text-white text-sm">
+                  {showAllStudents ? `All Students — School Roster (${classStudents.length})` : `Classroom Student Roster (${classStudents.length})`}
+                </h3>
+                {!showAllStudents && activeClass && (
+                  <button
+                    onClick={() => setShowWorksheetPortal(true)}
+                    className="bg-white dark:bg-slate-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 font-mono text-[10px] font-bold px-3 py-1.5 rounded-lg shadow-sm cursor-pointer hover:border-zinc-400 transition-colors"
+                  >
+                    Trigger Worksheets Flow
+                  </button>
+                )}
+              </div>
+              <div className="p-4">
+                {(() => {
+                  const studentColumns: Column<Student>[] = [
+                    { header: 'ID', accessor: 'id', sortKey: 'id', className: 'font-mono text-xs text-slate-400 dark:text-slate-500' },
+                    { header: 'Student Name', accessor: 'name', sortKey: 'name', className: 'font-medium text-slate-900 dark:text-slate-100' },
+                    { header: 'Aadhar / ID No.', accessor: 'aadharMasked', className: 'font-mono text-xs text-slate-500 dark:text-slate-400' },
+                    {
+                      header: 'Current Level',
+                      accessor: (s) => (
+                        <span className="font-mono font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 text-xs">
+                          L{s.currentLevel}.{s.currentSubLevel ?? 0}
                         </span>
                       )
                     },
