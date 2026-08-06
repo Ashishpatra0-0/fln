@@ -3143,6 +3143,37 @@ async function startServer() {
     res.json(bp);
   });
 
+  // Delete an intervention
+  app.delete('/api/interventions/:id', async (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const interventions = await dbStore.getInterventions();
+    const intervention = interventions.find(i => i.id === req.params.id);
+    if (!intervention) return res.status(404).json({ error: 'Intervention not found.' });
+
+    const canDelete = intervention.teacherId === user.id ||
+      [UserRole.SUPERADMIN, UserRole.ADMIN, UserRole.DISTRICT_ADMIN, UserRole.BLOCK_ADMIN, UserRole.SCHOOL].includes(user.role);
+    if (!canDelete) return res.status(403).json({ error: 'Forbidden.' });
+
+    await dbStore.deleteIntervention(req.params.id);
+
+    await dbStore.addLog({
+      id: 'log_' + randomUUID().slice(0, 8),
+      timestamp: new Date().toISOString(),
+      schoolId: user.schoolId || '',
+      schoolName: '',
+      userId: user.id,
+      userEmail: user.email,
+      userRole: user.role,
+      activityType: 'verify',
+      status: 'Success',
+      details: `Deleted intervention ${intervention.id} for ${intervention.studentName}`
+    });
+
+    res.json({ success: true });
+  });
+
   // Trigger reassessment for an intervention — this is the first place in the
   // codebase that actually sets/uses the 'pending_review' status (previously
   // defined in the type but never assigned anywhere).

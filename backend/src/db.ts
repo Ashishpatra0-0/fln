@@ -514,7 +514,7 @@ export class DBStore {
           }
           return u;
         }
-      } catch (_) {}
+      } catch (_) { }
     }
     return this.getUserSync(cleanEmail);
   }
@@ -532,36 +532,36 @@ export class DBStore {
     return this.data?.classes || [];
   }
   async getStudents(opts?: { limit?: number; offset?: number; schoolId?: string; teacherId?: string }) {
-      if (this.mongoDb) {
-        const filter: any = {};
-        if (opts?.schoolId) filter.schoolId = opts.schoolId;
-        if (opts?.teacherId) filter.teacherId = opts.teacherId;
-        const skip = opts?.offset || 0;
-        const limit = opts?.limit || 0;
-        const cursor = this.mongoDb.collection<Student>('students').find(filter);
-        if (skip) cursor.skip(skip);
-        if (limit) cursor.limit(limit);
-        return await cursor.toArray();
-      }
-      let result = this.data?.students || [];
-      if (opts?.schoolId) result = result.filter(s => s.schoolId === opts.schoolId);
-      if (opts?.teacherId) result = result.filter(s => s.teacherId === opts.teacherId);
-      if (opts?.offset) result = result.slice(opts.offset);
-      if (opts?.limit) result = result.slice(0, opts.limit);
-      return result;
+    if (this.mongoDb) {
+      const filter: any = {};
+      if (opts?.schoolId) filter.schoolId = opts.schoolId;
+      if (opts?.teacherId) filter.teacherId = opts.teacherId;
+      const skip = opts?.offset || 0;
+      const limit = opts?.limit || 0;
+      const cursor = this.mongoDb.collection<Student>('students').find(filter);
+      if (skip) cursor.skip(skip);
+      if (limit) cursor.limit(limit);
+      return await cursor.toArray();
     }
-    async countStudents(opts?: { schoolId?: string; teacherId?: string }) {
-      if (this.mongoDb) {
-        const filter: any = {};
-        if (opts?.schoolId) filter.schoolId = opts.schoolId;
-        if (opts?.teacherId) filter.teacherId = opts.teacherId;
-        return await this.mongoDb.collection('students').countDocuments(filter);
-      }
-      let result = this.data?.students || [];
-      if (opts?.schoolId) result = result.filter(s => s.schoolId === opts.schoolId);
-      if (opts?.teacherId) result = result.filter(s => s.teacherId === opts.teacherId);
-      return result.length;
+    let result = this.data?.students || [];
+    if (opts?.schoolId) result = result.filter(s => s.schoolId === opts.schoolId);
+    if (opts?.teacherId) result = result.filter(s => s.teacherId === opts.teacherId);
+    if (opts?.offset) result = result.slice(opts.offset);
+    if (opts?.limit) result = result.slice(0, opts.limit);
+    return result;
+  }
+  async countStudents(opts?: { schoolId?: string; teacherId?: string }) {
+    if (this.mongoDb) {
+      const filter: any = {};
+      if (opts?.schoolId) filter.schoolId = opts.schoolId;
+      if (opts?.teacherId) filter.teacherId = opts.teacherId;
+      return await this.mongoDb.collection('students').countDocuments(filter);
     }
+    let result = this.data?.students || [];
+    if (opts?.schoolId) result = result.filter(s => s.schoolId === opts.schoolId);
+    if (opts?.teacherId) result = result.filter(s => s.teacherId === opts.teacherId);
+    return result.length;
+  }
 
 
   /**
@@ -751,7 +751,7 @@ export class DBStore {
             { $sample: { size: 1 } }
           ]).toArray();
           if (docs && docs.length > 0) qDoc = docs[0];
-        } catch (_) {}
+        } catch (_) { }
       }
 
       if (qDoc) {
@@ -998,6 +998,14 @@ export class DBStore {
       if (idx !== -1) this.data.bestPractices[idx] = bp;
     }
     return bp || undefined;
+  }
+
+  async deleteIntervention(id: string) {
+    await this.mongoDb!.collection('interventions').deleteOne({ id });
+    if (this.data) {
+      this.data.interventions = this.data.interventions.filter(i => i.id !== id);
+    }
+    return { success: true };
   }
 
   // --- Diagnostic Answer Key Methods ---

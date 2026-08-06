@@ -1,7 +1,7 @@
 import { apiFetch } from '../services/apiClient';
 import React, { useState, useEffect } from 'react';
 import { UserRole } from '../types';
-import { Pencil } from 'lucide-react';
+import { Pencil, Trash2 } from 'lucide-react';
 
 interface InterventionOutcome {
     improved: boolean;
@@ -194,6 +194,29 @@ export const InterventionTracking: React.FC<Props> = ({ token, userRole, onSelec
             }
         } catch (err) {
             console.error('Failed to save note:', err);
+        }
+    };
+
+    const handleDeleteIntervention = async (interventionId: string, status: string) => {
+        const confirmMessage = status === 'completed'
+            ? 'This intervention has been completed and may have real outcome data. Are you sure you want to delete it?'
+            : 'Are you sure you want to delete this intervention?';
+
+        if (!window.confirm(confirmMessage)) return;
+
+        try {
+            const res = await apiFetch(`/api/interventions/${interventionId}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+                fetchInterventions();
+            } else {
+                const data = await res.json();
+                alert(data.error || 'Failed to delete intervention.');
+            }
+        } catch (err) {
+            alert('Network error deleting intervention.');
         }
     };
 
@@ -463,9 +486,20 @@ export const InterventionTracking: React.FC<Props> = ({ token, userRole, onSelec
                                         ))}
                                     </div>
                                 </div>
-                                <span className="text-[10px] font-mono text-zinc-400">
-                                    Started {new Date(intv.startDate).toLocaleDateString()}
-                                </span>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-[10px] font-mono text-zinc-400">
+                                        Started {new Date(intv.startDate).toLocaleDateString()}
+                                    </span>
+                                    {(userRole === UserRole.TEACHER && intv.teacherId) && (
+                                        <button
+                                            onClick={() => handleDeleteIntervention(intv.id, intv.status)}
+                                            className="text-zinc-400 hover:text-red-600 transition-colors p-1"
+                                            title="Delete this intervention"
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                        </button>
+                                    )}
+                                </div>
                             </div>
 
                             <p className="text-zinc-600 dark:text-zinc-300 text-xs leading-relaxed">
