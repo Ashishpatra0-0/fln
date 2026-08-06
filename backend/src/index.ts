@@ -77,7 +77,7 @@ async function startServer() {
 
   // --- API Endpoints ---
 
-registerStatsRoutes(app);
+  registerStatsRoutes(app);
 
   // Auth: Login
   app.post('/api/auth/login', authRateLimiter, async (req, res) => {
@@ -86,7 +86,7 @@ registerStatsRoutes(app);
       return res.status(400).json({ error: 'Email and password are required.' });
     }
 
-// Verify Password Rules (§3.2 A-3)
+    // Verify Password Rules (§3.2 A-3)
     const hasUppercase = /[A-Z]/.test(password);
     const hasNumber = /[0-9]/.test(password);
     const hasSpecial = /[!@#$%^&*(),.?":{}|<>]/.test(password);
@@ -492,57 +492,57 @@ registerStatsRoutes(app);
 
   // Students
   app.get('/api/students', async (req, res) => {
-      const user = getAuthUser(req);
-      if (!user) return res.status(401).json({ error: 'Unauthorized' });
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
-      // The students collection has 86400+ docs in Atlas; without a server-side
-      // limit a single query takes multi-seconds and the dashboard hangs. Push the
-      // limit/offset into mongo. Default 1000 unless caller opts in to full set.
-      const DEFAULT_LIMIT = 1000;
-      const requestedLimit = parseInt(String(req.query.limit ?? ''), 10);
-      const requestedOffset = parseInt(String(req.query.offset ?? ''), 10) || 0;
-      const wantAll = req.query.all === '1' || req.query.all === 'true';
-      const limit = wantAll ? 0 : (Number.isFinite(requestedLimit) && requestedLimit > 0 ? Math.min(requestedLimit, DEFAULT_LIMIT * 5) : DEFAULT_LIMIT);
+    // The students collection has 86400+ docs in Atlas; without a server-side
+    // limit a single query takes multi-seconds and the dashboard hangs. Push the
+    // limit/offset into mongo. Default 1000 unless caller opts in to full set.
+    const DEFAULT_LIMIT = 1000;
+    const requestedLimit = parseInt(String(req.query.limit ?? ''), 10);
+    const requestedOffset = parseInt(String(req.query.offset ?? ''), 10) || 0;
+    const wantAll = req.query.all === '1' || req.query.all === 'true';
+    const limit = wantAll ? 0 : (Number.isFinite(requestedLimit) && requestedLimit > 0 ? Math.min(requestedLimit, DEFAULT_LIMIT * 5) : DEFAULT_LIMIT);
 
-      // server-side role scoping
-      let schoolScope: string | undefined;
-      if (user.role === UserRole.TEACHER || user.role === UserRole.SCHOOL) {
-        schoolScope = user.schoolId;
+    // server-side role scoping
+    let schoolScope: string | undefined;
+    if (user.role === UserRole.TEACHER || user.role === UserRole.SCHOOL) {
+      schoolScope = user.schoolId;
+    }
+
+    const opts: { limit?: number; offset?: number; schoolId?: string } = {
+      offset: requestedOffset,
+    };
+    if (limit > 0) opts.limit = limit;
+    if (schoolScope) opts.schoolId = schoolScope;
+
+    const students = await dbStore.getStudents(opts);
+
+    // volunteer filter still applied in JS (assignedSchools list, not a single key)
+    const filtered = (user.role === UserRole.VOLUNTEER)
+      ? students.filter(s => user.assignedSchools?.includes(s.schoolId))
+      : students;
+
+    // Mask Aadhar for non-Superadmins (§13.2 R-6)
+    const masked = filtered.map(s => {
+      if (user.role !== UserRole.SUPERADMIN) {
+        return { ...s, aadharMasked: 'XXXX-XXXX-' + String(s.aadharMasked || '').slice(-4) };
       }
-
-      const opts: { limit?: number; offset?: number; schoolId?: string } = {
-        offset: requestedOffset,
-      };
-      if (limit > 0) opts.limit = limit;
-      if (schoolScope) opts.schoolId = schoolScope;
-
-      const students = await dbStore.getStudents(opts);
-
-      // volunteer filter still applied in JS (assignedSchools list, not a single key)
-      const filtered = (user.role === UserRole.VOLUNTEER)
-        ? students.filter(s => user.assignedSchools?.includes(s.schoolId))
-        : students;
-
-      // Mask Aadhar for non-Superadmins (§13.2 R-6)
-      const masked = filtered.map(s => {
-        if (user.role !== UserRole.SUPERADMIN) {
-          return { ...s, aadharMasked: 'XXXX-XXXX-' + String(s.aadharMasked || '').slice(-4) };
-        }
-        return s;
-      });
-
-      // total count (for client-side pagination headers)
-      const total = await dbStore.countStudents(schoolScope ? { schoolId: schoolScope } : undefined);
-      res.set('X-Total-Count', String(total));
-      res.json(masked);
+      return s;
     });
+
+    // total count (for client-side pagination headers)
+    const total = await dbStore.countStudents(schoolScope ? { schoolId: schoolScope } : undefined);
+    res.set('X-Total-Count', String(total));
+    res.json(masked);
+  });
 
   // Get or generate student's assigned 10-question FLN paper from MongoDB Atlas (Class 2: Levels 22 to 31)
   app.get('/api/students/:id/diagnostic-paper', async (req, res) => {
     const user = getAuthUser(req);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
-const students = await dbStore.getStudents();
+    const students = await dbStore.getStudents();
 
     // Roles with a direct, day-to-day relationship to the child (and superadmin)
     // see full contact/address PII; aggregate-scope admins and volunteers get it
@@ -1214,7 +1214,7 @@ const students = await dbStore.getStudents();
       const allStudents = await dbStore.getStudents();
       let classStudents = allStudents.filter(
         s => (s.classGroup || '').toLowerCase().includes(targetClass!.className.toLowerCase()) ||
-             targetClass!.className.toLowerCase().includes((s.classGroup || '').toLowerCase())
+          targetClass!.className.toLowerCase().includes((s.classGroup || '').toLowerCase())
       );
 
       if (classStudents.length === 0) {
@@ -2389,11 +2389,11 @@ const students = await dbStore.getStudents();
       // Calculate grade band filter factor
       let gradeFactor = 1.0;
       if (grade !== 'ALL') {
-        if (grade === 'Level 1-3') gradeFactor = 3/16;
-        else if (grade === 'Level 4-7') gradeFactor = 4/16;
-        else if (grade === 'Level 8-12') gradeFactor = 5/16;
-        else if (grade === 'Level 13-16') gradeFactor = 4/16;
-        else gradeFactor = 1/93;
+        if (grade === 'Level 1-3') gradeFactor = 3 / 16;
+        else if (grade === 'Level 4-7') gradeFactor = 4 / 16;
+        else if (grade === 'Level 8-12') gradeFactor = 5 / 16;
+        else if (grade === 'Level 13-16') gradeFactor = 4 / 16;
+        else gradeFactor = 1 / 93;
       }
 
       const totalStudents = Math.round(totalRegisteredSchools * 180 * gradeFactor);
@@ -2855,9 +2855,9 @@ const students = await dbStore.getStudents();
       const enrolled = allDbStudents.filter(s => {
         const cg = (s.classGroup || '').toLowerCase().trim();
         return cg === targetClassName.toLowerCase() ||
-               cg === String(classNumber) ||
-               cg.includes(`class ${classNumber}`) ||
-               cg.includes(`class_${classNumber}`);
+          cg === String(classNumber) ||
+          cg.includes(`class ${classNumber}`) ||
+          cg.includes(`class_${classNumber}`);
       });
 
       if (enrolled.length === 0) {
@@ -3158,35 +3158,51 @@ const students = await dbStore.getStudents();
     if (!user || user.role !== UserRole.TEACHER) {
       return res.status(403).json({ error: 'Only teachers can record interventions.' });
     }
-    const { studentId, weakCompetencies, strategyType, strategyDescription, duration, startDate } = req.body;
-    if (!studentId || !weakCompetencies?.length || !strategyType || !strategyDescription) {
+
+    const { studentIds, weakCompetencies, strategyType, strategyDescription, duration, startDate } = req.body;
+    if (!Array.isArray(studentIds) || studentIds.length === 0) {
+      return res.status(400).json({ error: 'studentIds must be a non-empty array.' });
+    }
+    if (!weakCompetencies?.length || !strategyType || !strategyDescription) {
       return res.status(400).json({ error: 'Missing required fields.' });
     }
-    const students = await dbStore.getStudents();
-    const student = students.find(s => s.id === studentId);
-    if (!student) return res.status(404).json({ error: 'Student not found.' });
 
-    const intervention: Intervention = {
-      id: 'int_' + randomUUID().slice(0, 8),
-      studentId,
-      studentName: student.name,
-      teacherId: user.id,
-      teacherName: user.name,
-      schoolId: user.schoolId || student.schoolId,
-      classId: student.classGroup,
-      className: student.classGroup,
-      section: student.section,
-      weakCompetencies,
-      currentLevel: student.currentLevel,
-      strategyType,
-      strategyDescription,
-      duration: duration || '2 weeks',
-      startDate: startDate || new Date().toISOString().split('T')[0],
-      status: 'active',
-      isPromoted: false,
-      createdAt: new Date().toISOString()
-    };
-    await dbStore.addIntervention(intervention);
+    const students = await dbStore.getStudents();
+    const created: Intervention[] = [];
+    const skipped: Array<{ studentId: string; reason: string }> = [];
+
+    for (const studentId of studentIds) {
+      const student = students.find(s => s.id === studentId);
+      if (!student) {
+        skipped.push({ studentId, reason: 'Student not found.' });
+        continue;
+      }
+
+      const intervention: Intervention = {
+        id: 'int_' + randomUUID().slice(0, 8),
+        studentId,
+        studentName: student.name,
+        teacherId: user.id,
+        teacherName: user.name,
+        schoolId: user.schoolId || student.schoolId,
+        classId: student.classGroup,
+        className: student.classGroup,
+        section: student.section,
+        weakCompetencies,
+        currentLevel: student.currentLevel,
+        strategyType,
+        strategyDescription,
+        duration: duration || '2 weeks',
+        startDate: startDate || new Date().toISOString().split('T')[0],
+        status: 'active',
+        isPromoted: false,
+        createdAt: new Date().toISOString()
+      };
+
+      await dbStore.addIntervention(intervention);
+      created.push(intervention);
+    }
+
     await dbStore.addLog({
       id: 'log_' + randomUUID().slice(0, 8),
       timestamp: new Date().toISOString(),
@@ -3197,9 +3213,15 @@ const students = await dbStore.getStudents();
       userRole: user.role,
       activityType: 'verify',
       status: 'Success',
-      details: `INTERVENTION: Recorded remedial intervention for ${student.name} — Strategy: ${strategyType}`
+      details: `INTERVENTION: Created ${created.length} intervention(s) with strategy "${strategyType}" for competencies: ${weakCompetencies.join(', ')}`
     });
-    res.json(intervention);
+
+    res.json({
+      success: true,
+      created: created.length,
+      interventions: created,
+      skipped
+    });
   });
 
   // List interventions (role-scoped)

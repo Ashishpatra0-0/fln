@@ -1,6 +1,7 @@
 import { apiFetch } from '../services/apiClient';
 import React, { useState, useEffect } from 'react';
 import { UserRole } from '../types';
+import { Pencil } from 'lucide-react';
 
 interface InterventionOutcome {
     improved: boolean;
@@ -62,16 +63,6 @@ function getDaysRemaining(startDate: string, duration: string): number {
 export const InterventionTracking: React.FC<Props> = ({ token, userRole, onSelectView }) => {
     const [interventions, setInterventions] = useState<Intervention[]>([]);
     const [loading, setLoading] = useState(true);
-    const [showCreateForm, setShowCreateForm] = useState(false);
-    const [formData, setFormData] = useState({
-        studentId: '',
-        weakCompetencies: '',
-        strategyType: 'visual_aids',
-        strategyDescription: '',
-        duration: '2 weeks'
-    });
-    const [submitting, setSubmitting] = useState(false);
-    const [formError, setFormError] = useState('');
     const [editingNotes, setEditingNotes] = useState<string | null>(null); // holds intervention id being edited
     const [noteDraft, setNoteDraft] = useState('');
     const [showSuggestions, setShowSuggestions] = useState<string | null>(null); // holds intervention id
@@ -79,6 +70,18 @@ export const InterventionTracking: React.FC<Props> = ({ token, userRole, onSelec
     const [loadingSuggestions, setLoadingSuggestions] = useState(false);
     const [viewingWorksheet, setViewingWorksheet] = useState<any | null>(null);
     const [loadingWorksheetView, setLoadingWorksheetView] = useState(false);
+    const [showCreateForm, setShowCreateForm] = useState(false);
+    const [classStudents, setClassStudents] = useState<any[]>([]);
+    const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
+    const [formData, setFormData] = useState({
+        weakCompetencies: '',
+        strategyType: 'visual_aids',
+        strategyDescription: '',
+        duration: '2 weeks'
+    });
+    const [submitting, setSubmitting] = useState(false);
+    const [formError, setFormError] = useState('');
+    const [result, setResult] = useState<{ created: number; skipped: any[] } | null>(null);
     const fetchInterventions = async () => {
         setLoading(true);
         try {
@@ -98,8 +101,12 @@ export const InterventionTracking: React.FC<Props> = ({ token, userRole, onSelec
 
     const handleCreateIntervention = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!formData.studentId || !formData.weakCompetencies || !formData.strategyDescription) {
-            setFormError('Please fill in Student ID, Weak Competencies, and Strategy Description.');
+        if (selectedStudentIds.length === 0) {
+            setFormError('Please select at least one student.');
+            return;
+        }
+        if (!formData.weakCompetencies || !formData.strategyDescription) {
+            setFormError('Please fill in weak competencies and strategy description.');
             return;
         }
         setFormError('');
@@ -113,21 +120,21 @@ export const InterventionTracking: React.FC<Props> = ({ token, userRole, onSelec
                     'Authorization': `Bearer ${token}`
                 },
                 body: JSON.stringify({
-                    studentId: formData.studentId,
+                    studentIds: selectedStudentIds,
                     weakCompetencies: formData.weakCompetencies.split(',').map(c => c.trim()),
                     strategyType: formData.strategyType,
                     strategyDescription: formData.strategyDescription,
                     duration: formData.duration
                 })
             });
-
+            const data = await res.json();
             if (res.ok) {
-                setShowCreateForm(false);
-                setFormData({ studentId: '', weakCompetencies: '', strategyType: 'visual_aids', strategyDescription: '', duration: '2 weeks' });
+                setResult({ created: data.created, skipped: data.skipped });
+                setSelectedStudentIds([]);
+                setFormData({ weakCompetencies: '', strategyType: 'visual_aids', strategyDescription: '', duration: '2 weeks' });
                 fetchInterventions();
             } else {
-                const data = await res.json();
-                setFormError(data.error || 'Failed to create intervention.');
+                setFormError(data.error || 'Failed to create bulk interventions.');
             }
         } catch (err) {
             setFormError('Network error creating intervention.');
@@ -238,6 +245,30 @@ export const InterventionTracking: React.FC<Props> = ({ token, userRole, onSelec
         }
     };
 
+    const fetchClassStudents = async () => {
+        try {
+            const res = await apiFetch('/api/students', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            if (Array.isArray(data)) setClassStudents(data);
+        } catch (err) {
+            console.error('Failed to fetch students:', err);
+        }
+    };
+
+    const toggleCreateForm = () => {
+        if (!showCreateForm) fetchClassStudents();
+        setShowCreateForm(!showCreateForm);
+        setResult(null);
+    };
+
+    const toggleStudentSelection = (studentId: string) => {
+        setSelectedStudentIds(prev =>
+            prev.includes(studentId) ? prev.filter(id => id !== studentId) : [...prev, studentId]
+        );
+    };
+
     useEffect(() => {
         fetchInterventions();
     }, [token]);
@@ -268,8 +299,8 @@ export const InterventionTracking: React.FC<Props> = ({ token, userRole, onSelec
                 </div>
                 {userRole === UserRole.TEACHER && (
                     <button
-                        onClick={() => setShowCreateForm(!showCreateForm)}
-                        className="bg-zinc-900 text-white font-medium text-sm py-2 px-4 rounded-lg hover:bg-zinc-700">
+                        onClick={toggleCreateForm}
+                        className="bg-indigo-600 text-white font-medium text-xs py-1.5 px-3 rounded-md hover:bg-indigo-700">
                         {showCreateForm ? 'Cancel' : '+ New Intervention'}
                     </button>
                 )}
@@ -296,16 +327,25 @@ export const InterventionTracking: React.FC<Props> = ({ token, userRole, onSelec
                         )}
 
                         <div>
-                            <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-200 uppercase tracking-wider mb-1">
-                                Student ID
+                            <label className="block text-xs font-medium text-zinc-700 uppercase tracking-wider mb-2">
+                                Select Students ({selectedStudentIds.length} selected)
                             </label>
-                            <input
-                                type="text"
-                                value={formData.studentId}
-                                onChange={(e) => setFormData({ ...formData, studentId: e.target.value })}
-                                placeholder="e.g. s1"
-                                className="w-full text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg p-2.5 bg-white dark:bg-slate-800 text-zinc-900 dark:text-white outline-none focus:border-zinc-500"
-                            />
+                            <div className="max-h-40 overflow-y-auto border border-zinc-200 rounded-lg p-2 space-y-1">
+                                {classStudents.length === 0 ? (
+                                    <p className="text-xs text-zinc-400 p-2">Loading students...</p>
+                                ) : (
+                                    classStudents.map(student => (
+                                        <label key={student.id} className="flex items-center gap-2 text-sm p-1.5 hover:bg-zinc-50 rounded cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedStudentIds.includes(student.id)}
+                                                onChange={() => toggleStudentSelection(student.id)}
+                                            />
+                                            <span>{student.name} — {student.classGroup} {student.section} (L{student.currentLevel})</span>
+                                        </label>
+                                    ))
+                                )}
+                            </div>
                         </div>
 
                         <div>
@@ -375,7 +415,7 @@ export const InterventionTracking: React.FC<Props> = ({ token, userRole, onSelec
                             disabled={submitting}
                             className="w-full bg-zinc-900 text-white font-medium text-sm py-2.5 px-4 rounded-lg hover:bg-zinc-700 disabled:opacity-50"
                         >
-                            {submitting ? 'Creating...' : 'Create Intervention Plan'}
+                            {submitting ? 'Creating...' : `Create ${selectedStudentIds.length || ''} Intervention(s)`}
                         </button>
                     </form>
                 </div>
@@ -492,9 +532,16 @@ export const InterventionTracking: React.FC<Props> = ({ token, userRole, onSelec
                                                 setEditingNotes(intv.id);
                                                 setNoteDraft(intv.teacherNotes || '');
                                             }}
-                                            className="text-[10px] font-bold text-indigo-600 hover:underline shrink-0"
+                                            className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:underline shrink-0"
                                         >
-                                            {intv.teacherNotes ? 'Edit' : '+ Add Note'}
+                                            {intv.teacherNotes ? (
+                                                <>
+                                                    <Pencil size={12} />
+                                                    Edit
+                                                </>
+                                            ) : (
+                                                '+ Add Note'
+                                            )}
                                         </button>
                                     </div>
                                 )}
@@ -560,8 +607,8 @@ export const InterventionTracking: React.FC<Props> = ({ token, userRole, onSelec
                                                                     sug.alreadyLinked ? "unlink" : "link"
                                                                 )}
                                                                 className={`text-[10px] font-bold px-2 py-1 rounded ${sug.alreadyLinked
-                                                                        ? "bg-zinc-200 text-zinc-600"
-                                                                        : "bg-indigo-600 hover:bg-indigo-500 text-white"
+                                                                    ? "bg-zinc-200 text-zinc-600"
+                                                                    : "bg-indigo-600 hover:bg-indigo-500 text-white"
                                                                     }`}
                                                             >
                                                                 {sug.alreadyLinked ? "Linked ✓" : "Link"}
