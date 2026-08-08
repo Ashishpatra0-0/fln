@@ -12,7 +12,7 @@ dotenv.config({ path: path.resolve(__dotenv_dir, '..', '.env') });
 
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
-import { dbStore, connectDB, UserRole, User, Student, School, Question, Worksheet, LevelWorksheet, AnswerSubmission, EvaluationReport, Ticket, LogEntry, Intervention, BestPractice } from './db';
+import { dbStore, connectDB, UserRole, User, Student, School, Question, Worksheet, LevelWorksheet, AnswerSubmission, EvaluationReport, Ticket, LogEntry, Intervention, BestPractice, PracticeSchedule, MicroAssignment } from './db';
 import { generateAIDiagnostic, evaluateAIDiagnostic, generateAIPersonalizedWorksheet, evaluateAIWorksheet } from './gemini';
 import { generateDiagnosticPaper } from './paperGenerator';
 import { generateQuestionsForLevel } from './levelGenerator';
@@ -64,7 +64,7 @@ async function startServer() {
 
   // --- API Endpoints ---
 
-registerStatsRoutes(app);
+  registerStatsRoutes(app);
 
   // Auth: Login
   app.post('/api/auth/login', authRateLimiter, async (req, res) => {
@@ -73,7 +73,7 @@ registerStatsRoutes(app);
       return res.status(400).json({ error: 'Email and password are required.' });
     }
 
-// Verify Password Rules (§3.2 A-3)
+    // Verify Password Rules (§3.2 A-3)
     const hasUppercase = /[A-Z]/.test(password);
     const hasNumber = /[0-9]/.test(password);
     const hasSpecial = /[!@#$%^&*(),.?":{}|<>]/.test(password);
@@ -478,57 +478,57 @@ registerStatsRoutes(app);
 
   // Students
   app.get('/api/students', async (req, res) => {
-      const user = getAuthUser(req);
-      if (!user) return res.status(401).json({ error: 'Unauthorized' });
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
-      // The students collection has 86400+ docs in Atlas; without a server-side
-      // limit a single query takes multi-seconds and the dashboard hangs. Push the
-      // limit/offset into mongo. Default 1000 unless caller opts in to full set.
-      const DEFAULT_LIMIT = 1000;
-      const requestedLimit = parseInt(String(req.query.limit ?? ''), 10);
-      const requestedOffset = parseInt(String(req.query.offset ?? ''), 10) || 0;
-      const wantAll = req.query.all === '1' || req.query.all === 'true';
-      const limit = wantAll ? 0 : (Number.isFinite(requestedLimit) && requestedLimit > 0 ? Math.min(requestedLimit, DEFAULT_LIMIT * 5) : DEFAULT_LIMIT);
+    // The students collection has 86400+ docs in Atlas; without a server-side
+    // limit a single query takes multi-seconds and the dashboard hangs. Push the
+    // limit/offset into mongo. Default 1000 unless caller opts in to full set.
+    const DEFAULT_LIMIT = 1000;
+    const requestedLimit = parseInt(String(req.query.limit ?? ''), 10);
+    const requestedOffset = parseInt(String(req.query.offset ?? ''), 10) || 0;
+    const wantAll = req.query.all === '1' || req.query.all === 'true';
+    const limit = wantAll ? 0 : (Number.isFinite(requestedLimit) && requestedLimit > 0 ? Math.min(requestedLimit, DEFAULT_LIMIT * 5) : DEFAULT_LIMIT);
 
-      // server-side role scoping
-      let schoolScope: string | undefined;
-      if (user.role === UserRole.TEACHER || user.role === UserRole.SCHOOL) {
-        schoolScope = user.schoolId;
+    // server-side role scoping
+    let schoolScope: string | undefined;
+    if (user.role === UserRole.TEACHER || user.role === UserRole.SCHOOL) {
+      schoolScope = user.schoolId;
+    }
+
+    const opts: { limit?: number; offset?: number; schoolId?: string } = {
+      offset: requestedOffset,
+    };
+    if (limit > 0) opts.limit = limit;
+    if (schoolScope) opts.schoolId = schoolScope;
+
+    const students = await dbStore.getStudents(opts);
+
+    // volunteer filter still applied in JS (assignedSchools list, not a single key)
+    const filtered = (user.role === UserRole.VOLUNTEER)
+      ? students.filter(s => user.assignedSchools?.includes(s.schoolId))
+      : students;
+
+    // Mask Aadhar for non-Superadmins (§13.2 R-6)
+    const masked = filtered.map(s => {
+      if (user.role !== UserRole.SUPERADMIN) {
+        return { ...s, aadharMasked: 'XXXX-XXXX-' + String(s.aadharMasked || '').slice(-4) };
       }
-
-      const opts: { limit?: number; offset?: number; schoolId?: string } = {
-        offset: requestedOffset,
-      };
-      if (limit > 0) opts.limit = limit;
-      if (schoolScope) opts.schoolId = schoolScope;
-
-      const students = await dbStore.getStudents(opts);
-
-      // volunteer filter still applied in JS (assignedSchools list, not a single key)
-      const filtered = (user.role === UserRole.VOLUNTEER)
-        ? students.filter(s => user.assignedSchools?.includes(s.schoolId))
-        : students;
-
-      // Mask Aadhar for non-Superadmins (§13.2 R-6)
-      const masked = filtered.map(s => {
-        if (user.role !== UserRole.SUPERADMIN) {
-          return { ...s, aadharMasked: 'XXXX-XXXX-' + String(s.aadharMasked || '').slice(-4) };
-        }
-        return s;
-      });
-
-      // total count (for client-side pagination headers)
-      const total = await dbStore.countStudents(schoolScope ? { schoolId: schoolScope } : undefined);
-      res.set('X-Total-Count', String(total));
-      res.json(masked);
+      return s;
     });
+
+    // total count (for client-side pagination headers)
+    const total = await dbStore.countStudents(schoolScope ? { schoolId: schoolScope } : undefined);
+    res.set('X-Total-Count', String(total));
+    res.json(masked);
+  });
 
   // Get or generate student's assigned 10-question FLN paper from MongoDB Atlas (Class 2: Levels 22 to 31)
   app.get('/api/students/:id/diagnostic-paper', async (req, res) => {
     const user = getAuthUser(req);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
-const students = await dbStore.getStudents();
+    const students = await dbStore.getStudents();
 
     // Roles with a direct, day-to-day relationship to the child (and superadmin)
     // see full contact/address PII; aggregate-scope admins and volunteers get it
@@ -1200,7 +1200,7 @@ const students = await dbStore.getStudents();
       const allStudents = await dbStore.getStudents();
       let classStudents = allStudents.filter(
         s => (s.classGroup || '').toLowerCase().includes(targetClass!.className.toLowerCase()) ||
-             targetClass!.className.toLowerCase().includes((s.classGroup || '').toLowerCase())
+          targetClass!.className.toLowerCase().includes((s.classGroup || '').toLowerCase())
       );
 
       if (classStudents.length === 0) {
@@ -2330,31 +2330,31 @@ const students = await dbStore.getStudents();
         schoolsCount: s.count,
         studentsCount: stateCode === 'ALL'
           ? (() => {
-              // For ALL, sum studentsBySchool entries whose school is in this state.
-              // We don't have state on studentBySchool key (schoolId only), so
-              // we count from the filtered list: easier to use allFilteredSchools.
-              // For per-state filter, we have the right number already.
-              if (s.stateCode === stateCode) {
-                return totalStudents;
-              }
-              // Approximate: skip the per-state student count when state=ALL
-              // to avoid loading all students. Set to 0 as a placeholder; the
-              // /api/students?stateCode=... endpoint returns accurate counts
-              // when filtered.
-              return 0;
-            })()
+            // For ALL, sum studentsBySchool entries whose school is in this state.
+            // We don't have state on studentBySchool key (schoolId only), so
+            // we count from the filtered list: easier to use allFilteredSchools.
+            // For per-state filter, we have the right number already.
+            if (s.stateCode === stateCode) {
+              return totalStudents;
+            }
+            // Approximate: skip the per-state student count when state=ALL
+            // to avoid loading all students. Set to 0 as a placeholder; the
+            // /api/students?stateCode=... endpoint returns accurate counts
+            // when filtered.
+            return 0;
+          })()
           : (() => {
-              // stateCode is a specific state — count students in schools of
-              // that state. We have allFilteredSchools with stateCode field,
-              // so count students per schoolId in that set.
-              const schIds = new Set(
-                allFilteredSchools.filter((sc: any) => sc.stateCode === s.stateCode)
-                  .map((sc: any) => sc.id)
-              );
-              let count = 0;
-              studentsBySchool.forEach((c, sid) => { if (schIds.has(sid)) count += c; });
-              return count;
-            })(),
+            // stateCode is a specific state — count students in schools of
+            // that state. We have allFilteredSchools with stateCode field,
+            // so count students per schoolId in that set.
+            const schIds = new Set(
+              allFilteredSchools.filter((sc: any) => sc.stateCode === s.stateCode)
+                .map((sc: any) => sc.id)
+            );
+            let count = 0;
+            studentsBySchool.forEach((c, sid) => { if (schIds.has(sid)) count += c; });
+            return count;
+          })(),
         avgScore: 0,
       })).sort((a, b) => b.schoolsCount - a.schoolsCount);
 
@@ -2667,9 +2667,9 @@ const students = await dbStore.getStudents();
       const enrolled = allDbStudents.filter(s => {
         const cg = (s.classGroup || '').toLowerCase().trim();
         return cg === targetClassName.toLowerCase() ||
-               cg === String(classNumber) ||
-               cg.includes(`class ${classNumber}`) ||
-               cg.includes(`class_${classNumber}`);
+          cg === String(classNumber) ||
+          cg.includes(`class ${classNumber}`) ||
+          cg.includes(`class_${classNumber}`);
       });
 
       if (enrolled.length === 0) {
@@ -3146,6 +3146,272 @@ const students = await dbStore.getStudents();
     if (!bp) return res.status(404).json({ error: 'Best practice not found.' });
     await dbStore.updateBestPractice(bp.id, { viewCount: (bp.viewCount || 0) + 1 });
     res.json({ ...bp, viewCount: (bp.viewCount || 0) + 1 });
+  });
+
+  // --- Adaptive Micro-Practice & Spaced-Repetition ---
+
+  // Simple interval-bump logic (not full SM-2): good performance doubles the
+  // interval (capped at 30 days), poor performance halves it (minimum 1 day).
+  function calculateNextInterval(currentIntervalDays: number, correctCount: number, totalCount: number): number {
+    const scorePercent = totalCount > 0 ? (correctCount / totalCount) * 100 : 0;
+    if (scorePercent >= 80) {
+      return Math.min(30, currentIntervalDays * 2);
+    }
+    return Math.max(1, Math.floor(currentIntervalDays / 2));
+  }
+
+  // Generate a new micro-practice assignment (3-5 questions) for a student on
+  // a specific weak competency. Reuses the existing question bank (matched by
+  // topic/subtopic, same pattern as the worksheet-suggestion matching engine)
+  // rather than generating new content.
+  app.post('/api/practice/generate/:studentId', async (req, res) => {
+    const user = getAuthUser(req);
+    if (!user || user.role !== UserRole.TEACHER) {
+      return res.status(403).json({ error: 'Only teachers can generate practice assignments.' });
+    }
+
+    const { competency } = req.body;
+    if (!competency) return res.status(400).json({ error: 'competency is required.' });
+
+    const students = await dbStore.getStudents();
+    const student = students.find(s => s.id === req.params.studentId);
+    if (!student) return res.status(404).json({ error: 'Student not found.' });
+
+    // Find or create the schedule for this student+competency
+    const schedules = await dbStore.getPracticeSchedules();
+    let schedule: PracticeSchedule | undefined = schedules.find(
+      s => s.studentId === student.id && s.competency === competency
+    );
+
+    if (!schedule) {
+      schedule = {
+        id: 'sched_' + randomUUID().slice(0, 8),
+        studentId: student.id,
+        studentName: student.name,
+        teacherId: user.id,
+        competency,
+        intervalDays: 1,
+        nextDueDate: new Date().toISOString(),
+        createdAt: new Date().toISOString()
+      };
+      await dbStore.addPracticeSchedule(schedule);
+    }
+
+    // Build a genuinely varied question pool: scan a range of levels around
+    // the student's current level (not just the static seed bank, which only
+    // has a handful of questions total) using the existing level generator,
+    // then filter for topic/subtopic matches against the requested competency.
+    const competencyLower = competency.toLowerCase();
+    const isMatch = (q: Question) =>
+      (q.topic || '').toLowerCase().includes(competencyLower) ||
+      competencyLower.includes((q.topic || '').toLowerCase()) ||
+      (q.subtopic || '').toLowerCase().includes(competencyLower);
+
+    const pooled: Question[] = [];
+    const seenTexts = new Set<string>();
+    const startLevel = Math.max(1, student.currentLevel - 5);
+    const endLevel = Math.min(59, student.currentLevel + 5);
+
+    for (let lvl = startLevel; lvl <= endLevel && pooled.length < 15; lvl++) {
+      for (let sub = 0; sub <= 2 && pooled.length < 15; sub++) {
+        const levelQuestions = generateQuestionsForLevel(lvl, sub);
+        for (const q of levelQuestions) {
+          if (isMatch(q) && !seenTexts.has(q.question)) {
+            pooled.push(q);
+            seenTexts.add(q.question);
+          }
+        }
+      }
+    }
+
+    // Also check the static seed bank for any additional matches not covered above.
+    const allQuestions = await dbStore.getQuestions();
+    for (const q of allQuestions) {
+      if (isMatch(q) && !seenTexts.has(q.question) && pooled.length < 15) {
+        pooled.push(q);
+        seenTexts.add(q.question);
+      }
+    }
+
+    // Final fallback: if genuinely nothing matches this competency anywhere,
+    // use the student's current level directly rather than failing outright.
+    const matched = pooled.length > 0
+      ? pooled
+      : generateQuestionsForLevel(student.currentLevel, student.currentSubLevel || 0);
+
+    // Shuffle lightly so repeated generations for the same competency don't
+    // always return the exact same 3-5 questions in the exact same order.
+    const shuffled = [...matched].sort(() => Math.random() - 0.5);
+    const selectedQuestions = shuffled.slice(0, 5);
+    if (selectedQuestions.length === 0) {
+      return res.status(400).json({ error: 'No suitable questions found for this competency.' });
+    }
+
+    const assignment: MicroAssignment = {
+      id: 'ma_' + randomUUID().slice(0, 8),
+      scheduleId: schedule.id,
+      studentId: student.id,
+      studentName: student.name,
+      competency,
+      questions: selectedQuestions,
+      assignedAt: new Date().toISOString(),
+      totalCount: selectedQuestions.length
+    };
+    await dbStore.addMicroAssignment(assignment);
+
+    res.json({ schedule, assignment });
+  });
+
+  // List practice items due today or overdue, scoped to the requesting
+  // teacher's own students (schedule.teacherId).
+  app.get('/api/practice/due', async (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const schedules = await dbStore.getPracticeSchedules();
+    const now = new Date();
+
+    let scoped = schedules;
+    if (user.role === UserRole.TEACHER) {
+      scoped = schedules.filter(s => s.teacherId === user.id);
+    }
+    // Admins/Superadmin see everything; other roles get nothing by default
+    // (this feature is teacher-driven, matching the Intervention pattern).
+    else if (![UserRole.SUPERADMIN, UserRole.ADMIN, UserRole.DISTRICT_ADMIN, UserRole.BLOCK_ADMIN, UserRole.SCHOOL].includes(user.role)) {
+      scoped = [];
+    }
+
+    const due = scoped.filter(s => new Date(s.nextDueDate) <= now);
+    res.json(due);
+  });
+
+  // Submit results for a completed micro-assignment: grades against the
+  // stored answer key, updates the schedule's next due date using the simple
+  // interval-bump logic above.
+  app.post('/api/practice/:id/submit', async (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { answers } = req.body; // { [question_id]: "submitted answer" }
+    if (!answers) return res.status(400).json({ error: 'answers is required.' });
+
+    const assignments = await dbStore.getMicroAssignments();
+    const assignment = assignments.find(a => a.id === req.params.id);
+    if (!assignment) return res.status(404).json({ error: 'Assignment not found.' });
+    if (assignment.completedAt) return res.status(400).json({ error: 'This assignment was already submitted.' });
+
+    let correctCount = 0;
+    assignment.questions.forEach(q => {
+      const submitted = (answers[q.question_id] || '').trim().toLowerCase();
+      const correct = q.answer.trim().toLowerCase();
+      if (submitted === correct) correctCount++;
+    });
+
+    const now = new Date().toISOString();
+    await dbStore.updateMicroAssignment(assignment.id, { completedAt: now, correctCount });
+
+    const schedules = await dbStore.getPracticeSchedules();
+    const schedule = schedules.find(s => s.id === assignment.scheduleId);
+    if (schedule) {
+      const nextInterval = calculateNextInterval(schedule.intervalDays, correctCount, assignment.totalCount);
+      const nextDue = new Date(Date.now() + nextInterval * 24 * 60 * 60 * 1000);
+      await dbStore.updatePracticeSchedule(schedule.id, {
+        intervalDays: nextInterval,
+        nextDueDate: nextDue.toISOString(),
+        lastCompletedAt: now
+      });
+    }
+
+    res.json({
+      success: true,
+      correctCount,
+      totalCount: assignment.totalCount,
+      scorePercent: Math.round((correctCount / assignment.totalCount) * 100)
+    });
+  });
+
+  // Overview of all practiced competencies per student, independent of due
+  // status. Groups completed micro-assignments by (studentId, competency) and
+  // returns the latest score + attempt count for each — this powers the
+  // "Student Progress" section, separate from the due-today scheduling list.
+  app.get('/api/practice/progress', async (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const assignments = await dbStore.getMicroAssignments();
+    const completed = assignments.filter(a => a.completedAt);
+
+    // Scope to the teacher's own students where relevant, matching the
+    // existing pattern used for /api/practice/due.
+    const schedules = await dbStore.getPracticeSchedules();
+    let scopedScheduleIds: Set<string> | null = null;
+    if (user.role === UserRole.TEACHER) {
+      scopedScheduleIds = new Set(schedules.filter(s => s.teacherId === user.id).map(s => s.id));
+    }
+
+    const scopedCompleted = scopedScheduleIds
+      ? completed.filter(a => scopedScheduleIds!.has(a.scheduleId))
+      : completed;
+
+    // Group by studentId -> competency -> list of attempts (chronological)
+    const grouped: Record<string, Record<string, any[]>> = {};
+    for (const a of scopedCompleted) {
+      if (!grouped[a.studentId]) grouped[a.studentId] = {};
+      if (!grouped[a.studentId][a.competency]) grouped[a.studentId][a.competency] = [];
+      grouped[a.studentId][a.competency].push({
+        id: a.id,
+        completedAt: a.completedAt,
+        correctCount: a.correctCount || 0,
+        totalCount: a.totalCount,
+        scorePercent: a.totalCount > 0 ? Math.round(((a.correctCount || 0) / a.totalCount) * 100) : 0
+      });
+    }
+
+    // Build the response: one entry per student, with a list of competencies,
+    // each showing its latest score and total attempt count.
+    const result = Object.entries(grouped).map(([studentId, competencies]) => {
+      const studentName = scopedCompleted.find(a => a.studentId === studentId)?.studentName || 'Unknown';
+      const competencyList = Object.entries(competencies).map(([competency, attempts]) => {
+        const sorted = [...attempts].sort((a, b) => new Date(a.completedAt).getTime() - new Date(b.completedAt).getTime());
+        const latest = sorted[sorted.length - 1];
+        return {
+          competency,
+          latestScorePercent: latest.scorePercent,
+          attemptCount: sorted.length,
+          lastPracticedAt: latest.completedAt
+        };
+      });
+      return { studentId, studentName, competencies: competencyList };
+    });
+
+    res.json(result);
+  });
+
+  // Mastery-over-time trend for a specific student+competency — shows how
+  // scores on repeated micro-practice sets have changed, giving a genuine
+  // "is this actually improving" signal beyond a single snapshot.
+  app.get('/api/practice/history/:studentId', async (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { competency } = req.query;
+    const assignments = await dbStore.getMicroAssignments();
+
+    let history = assignments.filter(a => a.studentId === req.params.studentId && a.completedAt);
+    if (competency && typeof competency === 'string') {
+      history = history.filter(a => a.competency === competency);
+    }
+
+    history.sort((a, b) => new Date(a.completedAt!).getTime() - new Date(b.completedAt!).getTime());
+
+    res.json(history.map(a => ({
+      id: a.id,
+      competency: a.competency,
+      completedAt: a.completedAt,
+      correctCount: a.correctCount,
+      totalCount: a.totalCount,
+      scorePercent: a.totalCount > 0 ? Math.round(((a.correctCount || 0) / a.totalCount) * 100) : 0
+    })));
   });
 
   // In development, serve the frontend using Vite development middleware.
