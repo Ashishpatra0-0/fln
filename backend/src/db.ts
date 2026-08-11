@@ -425,6 +425,28 @@ export class DBStore {
     return null;
   }
 
+  // Generic key-value config store. Keys are arbitrary strings; values
+  // are arbitrary JSON-serializable blobs. Stored in MongoDB collection
+  // `appConfig` ({_id: key, value}). Used for runtime config like
+  // ICR_CLOUD_API_KEY_GOOGLE etc that admins set via the API instead
+  // of environment variables.
+  async getConfig(key: string): Promise<any> {
+    const db = this.getDb();
+    if (!db) return null;
+    const doc = await db.collection('appConfig').findOne({ _id: key } as any);
+    return doc?.value ?? null;
+  }
+
+  async setConfig(key: string, value: any): Promise<void> {
+    const db = this.getDb();
+    if (!db) throw new Error('MongoDB not connected');
+    await db.collection('appConfig').updateOne(
+      { _id: key } as any,
+      { $set: { value, updatedAt: new Date() } },
+      { upsert: true }
+    );
+  }
+
   async init() {
     if (mongoClient) {
       try {
