@@ -12,10 +12,11 @@ dotenv.config({ path: path.resolve(__dotenv_dir, '..', '.env') });
 
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
-import { dbStore, connectDB, UserRole, User, Student, School, Question, Worksheet, LevelWorksheet, AnswerSubmission, EvaluationReport, Ticket, LogEntry, Intervention, BestPractice, PracticeSchedule, MicroAssignment } from './db';
+import { dbStore, connectDB, UserRole, User, Student, School, Question, Worksheet, LevelWorksheet, AnswerSubmission, EvaluationReport, Ticket, LogEntry, Intervention, BestPractice, PracticeSchedule, MicroAssignment, UploadedPaper } from './db';
 import { generateAIDiagnostic, evaluateAIDiagnostic, generateAIPersonalizedWorksheet, evaluateAIWorksheet } from './gemini';
 import { generateDiagnosticPaper } from './paperGenerator';
 import { generateQuestionsForLevel } from './levelGenerator';
+import { getStrandForLevel, mapCompetencyToLevel, KNOWN_COMPETENCIES } from './flnLevels';
 import * as levelsBackendClient from './levelsBackendClient';
 import { STATES_UTS } from './geoData';
 import { getAuthUser, canAccessStudent, sanitizeUser, JWT_SECRET, JWT_EXPIRES_IN, SEED_DEMO_PASSWORD_HASH } from './auth';
@@ -37,6 +38,24 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const VENV_PYTHON = path.resolve(ROOT_DIR, '..', 'ai-services', '.venv', 'Scripts', 'python.exe');
 const PYTHON_BIN = process.env.PYTHON_BIN || (fs.existsSync(VENV_PYTHON) ? VENV_PYTHON : (process.platform === 'win32' ? 'python' : 'python3'));
 const AI_SERVICES_DIR = process.env.AI_SERVICES_DIR || path.resolve(ROOT_DIR, '..', 'ai-services');
+
+// execFileSync throws on non-zero exit before we can read stdout normally.
+// Our Python scripts print a JSON error line to stdout before exiting
+// non-zero on failure, so pull the real message out of e.stdout instead of
+// using execFileSync's generic "Command failed: ..." wrapper text.
+function extractPythonScriptError(e: any, fallbackPrefix: string): string {
+  const stdout: string = typeof e?.stdout === 'string' ? e.stdout : (e?.stdout ? String(e.stdout) : '');
+  const lastLine = stdout.trim().split('\n').filter(Boolean).pop();
+  if (lastLine) {
+    try {
+      const parsed = JSON.parse(lastLine);
+      if (parsed && parsed.error) return parsed.error;
+    } catch {
+      // not JSON — fall through to the generic message
+    }
+  }
+  return `${fallbackPrefix}: ${e?.message || e}`;
+}
 
 // Throttle auth endpoints to slow down brute-force / credential-stuffing attempts.
 const authRateLimiter = rateLimit({
@@ -982,7 +1001,7 @@ async function startServer() {
       'Number Sense': recommendedLevel >= 15 ? 'Strong' : 'Needs Practice',
       'Shapes': recommendedLevel >= 25 ? 'Strong' : 'Needs Practice',
       'Fractions': recommendedLevel >= 35 ? 'Strong' : 'Needs Practice',
-      'Operations': recommendedLevel >= 12 ? 'Strong' : 'Needs Practice'
+      'Number Operations': recommendedLevel >= 12 ? 'Strong' : 'Needs Practice'
     };
 
     try {
@@ -1100,7 +1119,7 @@ async function startServer() {
             } catch (e: any) {
               return res.status(500).json({
                 success: false,
-                error: `PDF rasterization failed: ${e?.message || e}`,
+                error: extractPythonScriptError(e, 'PDF rasterization failed'),
               });
             }
             const pdfLine = pdfStdout.trim().split('\n').filter(Boolean).pop() || '{}';
@@ -1169,6 +1188,105 @@ async function startServer() {
           try { fs.unlinkSync(outputPath); } catch { /* noop */ }
         }
       });
+
+  // Rasterizes an uploaded PDF to plain PNG data URL(s) — nothing else. Used
+  // by the micro-practice paper-upload flow so it can run jsQR (which only
+  // reads pixel data, not PDFs) against a PDF-scanned completed paper.
+  // Deliberately does NOT chain the blue-ink filter that /api/icr/filter
+  // runs afterward — that step isolates handwritten blue pen and explicitly
+  // discards printed text (per bluepen_filter.py's own docstring), which
+  // would destroy a printed QR code.
+  //
+  // Default (allPages absent/false): rasterizes page 1 only, returns a
+  // single `imageDataUrl` — unchanged, backward-compatible behavior.
+  // allPages: true: rasterizes every page, returns `imageDataUrls` (array,
+  // one per page) instead — used for multi-page PDFs that may contain
+  // multiple different students' papers, one per page.
+  app.post('/api/icr/rasterize-pdf', async (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { fileBase64, allPages } = req.body || {};
+    if (!fileBase64 || typeof fileBase64 !== 'string') {
+      return res.status(400).json({ error: 'fileBase64 is required.' });
+    }
+    const pdfMatch = /^data:application\/pdf;base64,(.+)$/.exec(fileBase64);
+    if (!pdfMatch) {
+      return res.status(400).json({ error: 'fileBase64 must be a base64-encoded PDF data URL.' });
+    }
+    const buf = Buffer.from(pdfMatch[1], 'base64');
+    if (buf.length === 0) {
+      return res.status(400).json({ error: 'fileBase64 decoded to zero bytes.' });
+    }
+    if (buf.length > 8 * 1024 * 1024) {
+      return res.status(413).json({ error: 'File too large (max 8 MB).' });
+    }
+
+    const tempDir = path.join(AI_SERVICES_DIR, 'scratch');
+    fs.mkdirSync(tempDir, { recursive: true });
+    const stamp = Date.now() + '_' + randomUUID().slice(0, 8);
+    const inputPath = path.join(tempDir, `rasterize_${stamp}_in.pdf`);
+    const outputPath = path.join(tempDir, `rasterize_${stamp}_out.png`);
+    const pageOutputPaths: string[] = [];
+
+    try {
+      fs.writeFileSync(inputPath, buf);
+
+      const rasterScript = path.join(AI_SERVICES_DIR, 'scripts', 'pdf_rasterize.py');
+      const { execFileSync } = await import('child_process');
+      const scriptArgs = [rasterScript, inputPath, outputPath];
+      if (allPages) scriptArgs.push('--all-pages');
+      let stdout: string;
+      try {
+        stdout = execFileSync(
+          PYTHON_BIN,
+          scriptArgs,
+          { cwd: AI_SERVICES_DIR, timeout: 30000, encoding: 'utf8' }
+        );
+      } catch (e: any) {
+        return res.status(500).json({ success: false, error: extractPythonScriptError(e, 'PDF rasterization failed') });
+      }
+      const jsonLine = stdout.trim().split('\n').filter(Boolean).pop() || '{}';
+      let parsed: any = {};
+      try {
+        parsed = JSON.parse(jsonLine);
+      } catch {
+        return res.status(500).json({ success: false, error: `PDF rasterizer returned non-JSON: ${stdout.slice(0, 300)}` });
+      }
+      if (!parsed.success) {
+        return res.status(500).json({ success: false, error: parsed.error || 'PDF rasterization failed.' });
+      }
+
+      if (allPages) {
+        const pages: Array<{ output_path: string; page_number: number }> = parsed.pages || [];
+        const imageDataUrls = pages.map(p => {
+          pageOutputPaths.push(p.output_path);
+          const pngBuf = fs.readFileSync(p.output_path);
+          return `data:image/png;base64,${pngBuf.toString('base64')}`;
+        });
+        return res.json({
+          success: true,
+          imageDataUrls,
+          pageCount: pages.length
+        });
+      }
+
+      const pngBuf = fs.readFileSync(outputPath);
+      res.json({
+        success: true,
+        imageDataUrl: `data:image/png;base64,${pngBuf.toString('base64')}`,
+        pageSize: parsed.page_size
+      });
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      console.error('[icr-rasterize-pdf] failed:', msg);
+      res.status(500).json({ success: false, error: msg });
+    } finally {
+      try { fs.unlinkSync(inputPath); } catch { /* noop */ }
+      try { fs.unlinkSync(outputPath); } catch { /* noop */ }
+      for (const p of pageOutputPaths) { try { fs.unlinkSync(p); } catch { /* noop */ } }
+    }
+  });
 
   // ICR Answer Sheet Scanner (Single or Bulk Class Evaluation for PDF & Image uploads with EasyOCR)
   app.post('/api/icr/evaluate-pdf', async (req, res) => {
@@ -1421,7 +1539,7 @@ async function startServer() {
           conceptMastery: {
             'Number Sense': percentage >= 70 ? 'Strong' : 'Needs Practice',
             'Shapes': percentage >= 60 ? 'Strong' : 'Needs Practice',
-            'Operations': percentage >= 50 ? 'Strong' : 'Needs Practice'
+            'Number Operations': percentage >= 50 ? 'Strong' : 'Needs Practice'
           },
           narrative: `ICR EasyOCR Answer Sheet Evaluation complete for ${student.name}. Score: ${score}/${diagQuestions.length} (${percentage}%). Assessed at Level ${recommendedLevel}.${subLevel}. Raw OCR: "${rawOcrText.slice(0, 60)}"`,
           recommendedLevel,
@@ -3514,20 +3632,541 @@ async function startServer() {
 
   // --- Adaptive Micro-Practice & Spaced-Repetition ---
 
-  // Simple interval-bump logic (not full SM-2): good performance doubles the
-  // interval (capped at 30 days), poor performance halves it (minimum 1 day).
-  function calculateNextInterval(currentIntervalDays: number, correctCount: number, totalCount: number): number {
-    const scorePercent = totalCount > 0 ? (correctCount / totalCount) * 100 : 0;
-    if (scorePercent >= 80) {
-      return Math.min(30, currentIntervalDays * 2);
+  // Resolves a weak-competency name to its easiest matching level in the
+  // 59-level micro-practice generation system (see flnLevels.ts). The
+  // frontend never needs to know about levelId numbering directly.
+  app.get('/api/practice/competency-to-level', async (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { competency } = req.query;
+    if (!competency || typeof competency !== 'string') {
+      return res.status(400).json({ error: 'competency query parameter is required.' });
     }
-    return Math.max(1, Math.floor(currentIntervalDays / 2));
+
+    const levelId = mapCompetencyToLevel(competency);
+    res.json({ levelId });
+  });
+
+  // Shared logic for weak-competency lookup — used by both
+  // GET /api/students/:id/weak-competencies (single-student UI lookup) and
+  // POST /api/practice/bulk-generate (class-wide generation, below).
+  // Normalizes a raw conceptMastery topic string against the 9 known
+  // competency names. Exact match (case-insensitive) first; otherwise, if the
+  // raw string is a substring of EXACTLY ONE known competency (e.g.
+  // "Operations" -> "Number Operations"), use that. If it's ambiguous — the
+  // fragment could plausibly belong to more than one known competency (e.g.
+  // "Number" matches both "Number Sense" and "Number Operations") — we don't
+  // guess; the raw string is returned unchanged rather than risk an incorrect
+  // match.
+  function normalizeCompetencyName(raw: string): string {
+    const target = raw.trim().toLowerCase();
+    if (!target) return raw;
+
+    const exact = KNOWN_COMPETENCIES.find(c => c.toLowerCase() === target);
+    if (exact) return exact;
+
+    if (target.length >= 4) {
+      const candidates = KNOWN_COMPETENCIES.filter(c => c.toLowerCase().includes(target));
+      if (candidates.length === 1) return candidates[0];
+    }
+
+    return raw;
   }
 
-  // Generate a new micro-practice assignment (3-5 questions) for a student on
-  // a specific weak competency. Reuses the existing question bank (matched by
-  // topic/subtopic, same pattern as the worksheet-suggestion matching engine)
-  // rather than generating new content.
+  async function getWeakCompetenciesForStudent(studentId: string) {
+    const reports = await dbStore.getEvaluationReports();
+    const studentReports = reports
+      .filter(r => r.studentId === studentId)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    if (studentReports.length === 0) {
+      return { hasEvaluationData: false, weakCompetencies: [] as string[], fullMastery: undefined as any, latestReportDate: null as string | null };
+    }
+
+    const latest = studentReports[0];
+    const weak = Array.from(new Set(
+      Object.entries(latest.conceptMastery || {})
+        .filter(([_, status]) => status === 'Needs Practice')
+        .map(([topic]) => normalizeCompetencyName(topic))
+    ));
+
+    return {
+      hasEvaluationData: true,
+      weakCompetencies: weak,
+      fullMastery: latest.conceptMastery,
+      latestReportDate: latest.timestamp
+    };
+  }
+
+  // Weak competencies for one student, derived from their most recent
+  // evaluation report's conceptMastery breakdown. Used by the generate-paper
+  // form to scope the competency dropdown to the student's actual weak areas.
+  app.get('/api/students/:id/weak-competencies', async (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    res.json(await getWeakCompetenciesForStudent(req.params.id));
+  });
+
+  // Generate a lightweight, single-section printable PDF for one micro-practice
+  // question set (see generateMicroPracticePaper in paperGenerator.ts). Distinct
+  // from /api/worksheets/generate-level-pdf, which renders the full multi-section
+  // level worksheet.
+  app.post('/api/students/:id/micro-practice/generate-pdf', async (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const students = await dbStore.getStudents();
+    const student = students.find(s => s.id === req.params.id);
+    if (!student) return res.status(404).json({ error: 'Student not found.' });
+    if (!canAccessStudent(user, student)) return res.status(403).json({ error: 'Forbidden.' });
+
+    const { levelId, subIdx, sectionIndex, questionCount } = req.body;
+    if (levelId == null || subIdx == null || sectionIndex == null || questionCount == null) {
+      return res.status(400).json({ error: 'levelId, subIdx, sectionIndex, and questionCount are required.' });
+    }
+    if (!Number.isInteger(Number(questionCount)) || Number(questionCount) < 1) {
+      return res.status(400).json({ error: 'questionCount must be a positive integer.' });
+    }
+
+    try {
+      const { generateMicroPracticePaper } = await import('./paperGenerator');
+      const result = await generateMicroPracticePaper({
+        studentId: student.id,
+        studentName: student.name,
+        levelId: Number(levelId),
+        subIdx: Number(subIdx),
+        sectionIndex: Number(sectionIndex),
+        questionCount: Number(questionCount)
+      });
+
+      // Persist the real, generation-time answer key so it can be looked up
+      // later by paperId (see GET /api/practice/paper/:paperId below) instead
+      // of re-running generateMicroSet, which would produce different random
+      // question values on a second call.
+      await dbStore.addMicroPracticePaper({
+        id: result.paperId,
+        studentId: student.id,
+        studentName: student.name,
+        competency: getStrandForLevel(Number(levelId)),
+        levelId: Number(levelId),
+        subIdx: Number(subIdx),
+        sectionIndex: Number(sectionIndex),
+        questionCount: Number(questionCount),
+        questions: result.questions,
+        pdfUrl: result.pdfUrl,
+        createdAt: new Date().toISOString()
+      });
+
+      res.json({ success: true, pdfUrl: result.pdfUrl, paperId: result.paperId });
+    } catch (err: any) {
+      console.error('Micro-practice PDF generation failed:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Generate ONE combined printable PDF covering multiple weak competencies
+  // for a single student (see generateMultiCompetencyMicroPaper in
+  // paperGenerator.ts). Distinct from /api/students/:id/micro-practice/generate-pdf,
+  // which covers exactly one competency per paper.
+  app.post('/api/students/:id/micro-practice/generate-multi-pdf', async (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const students = await dbStore.getStudents();
+    const student = students.find(s => s.id === req.params.id);
+    if (!student) return res.status(404).json({ error: 'Student not found.' });
+    if (!canAccessStudent(user, student)) return res.status(403).json({ error: 'Forbidden.' });
+
+    const { competencies, questionsPerCompetency } = req.body;
+    if (!Array.isArray(competencies) || competencies.length === 0) {
+      return res.status(400).json({ error: 'competencies must be a non-empty array.' });
+    }
+    if (!Number.isInteger(Number(questionsPerCompetency)) || Number(questionsPerCompetency) < 1) {
+      return res.status(400).json({ error: 'questionsPerCompetency must be a positive integer.' });
+    }
+
+    try {
+      const { generateMultiCompetencyMicroPaper } = await import('./paperGenerator');
+      const result = await generateMultiCompetencyMicroPaper({
+        studentId: student.id,
+        studentName: student.name,
+        competencies,
+        questionsPerCompetency: Number(questionsPerCompetency)
+      });
+
+      await dbStore.addMicroPracticePaper({
+        id: result.paperId,
+        studentId: student.id,
+        studentName: student.name,
+        pdfUrl: result.pdfUrl,
+        createdAt: new Date().toISOString(),
+        parts: result.parts
+      });
+
+      res.json({ success: true, pdfUrl: result.pdfUrl, paperId: result.paperId });
+    } catch (err: any) {
+      console.error('Multi-competency micro-practice PDF generation failed:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  interface MicroBulkJob {
+    jobId: string;
+    total: number;
+    completed: number;
+    status: 'running' | 'completed' | 'failed';
+    results: any[];
+    combinedPdfUrl: string | null;
+    zipUrl: string | null;
+    error: string;
+  }
+
+  const microBulkJobs = new Map<string, MicroBulkJob>();
+
+  // Generates a personalized multi-competency micro-practice paper for every
+  // student in studentIds, in one action. Students with no weak competencies
+  // on record (not yet diagnosed) are skipped, not failed. One student's
+  // failure — missing student, forbidden access, or a generation error —
+  // does not stop the rest of the batch from processing.
+  //
+  // Runs as a background job (same pattern as /api/diagnostic/bulk) rather
+  // than blocking the request until every student is done, so the frontend
+  // can poll GET /api/practice/bulk-generate/:jobId/progress for a live
+  // completed/total counter instead of waiting on one long request.
+  app.post('/api/practice/bulk-generate', async (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { studentIds, questionsPerCompetency, studentCompetencyOverrides } = req.body;
+    if (!Array.isArray(studentIds) || studentIds.length === 0) {
+      return res.status(400).json({ error: 'studentIds must be a non-empty array.' });
+    }
+    if (!Number.isInteger(Number(questionsPerCompetency)) || Number(questionsPerCompetency) < 1) {
+      return res.status(400).json({ error: 'questionsPerCompetency must be a positive integer.' });
+    }
+
+    const jobId = 'microbulk_' + randomUUID();
+    const job: MicroBulkJob = {
+      jobId,
+      total: studentIds.length,
+      completed: 0,
+      status: 'running',
+      results: [],
+      combinedPdfUrl: null,
+      zipUrl: null,
+      error: ''
+    };
+    microBulkJobs.set(jobId, job);
+
+    // Run in background — the response below is sent immediately, before
+    // any student's paper has been generated.
+    (async () => {
+      try {
+        const students = await dbStore.getStudents();
+        const generatedFiles: { studentId: string; studentName: string; filePath: string }[] = [];
+
+        for (const studentId of studentIds) {
+          const student = students.find(s => s.id === studentId);
+          if (!student) {
+            job.results.push({ studentId, studentName: null, skipped: true, reason: 'Student not found.' });
+            job.completed++;
+            continue;
+          }
+          if (!canAccessStudent(user, student)) {
+            job.results.push({ studentId, studentName: student.name, skipped: true, reason: 'Forbidden.' });
+            job.completed++;
+            continue;
+          }
+
+          try {
+            // A caller-supplied override (e.g. "papers due today") takes the
+            // exact competency list as given — it already implies real
+            // schedule/evaluation history, so the "not yet diagnosed" skip
+            // below only applies when falling back to the full weak-competency
+            // list from the student's latest evaluation report.
+            const overrideCompetencies = studentCompetencyOverrides?.[studentId];
+            let competencies: string[];
+            if (Array.isArray(overrideCompetencies) && overrideCompetencies.length > 0) {
+              competencies = overrideCompetencies;
+            } else {
+              const weakData = await getWeakCompetenciesForStudent(studentId);
+              if (!weakData.weakCompetencies || weakData.weakCompetencies.length === 0) {
+                job.results.push({ studentId, studentName: student.name, skipped: true, reason: 'Not yet diagnosed' });
+                job.completed++;
+                continue;
+              }
+              competencies = weakData.weakCompetencies;
+            }
+
+            const { generateMultiCompetencyMicroPaper } = await import('./paperGenerator');
+            const result = await generateMultiCompetencyMicroPaper({
+              studentId: student.id,
+              studentName: student.name,
+              competencies,
+              questionsPerCompetency: Number(questionsPerCompetency)
+            });
+
+            await dbStore.addMicroPracticePaper({
+              id: result.paperId,
+              studentId: student.id,
+              studentName: student.name,
+              pdfUrl: result.pdfUrl,
+              createdAt: new Date().toISOString(),
+              parts: result.parts
+            });
+
+            job.results.push({ studentId, studentName: student.name, skipped: false, pdfUrl: result.pdfUrl, paperId: result.paperId });
+            generatedFiles.push({ studentId: student.id, studentName: student.name, filePath: result.filePath });
+          } catch (err: any) {
+            console.error(`Bulk micro-practice generation failed for student ${studentId}:`, err);
+            job.results.push({ studentId, studentName: student.name, skipped: true, reason: err.message || 'Generation failed.' });
+          }
+          job.completed++;
+        }
+
+        if (generatedFiles.length > 0) {
+          try {
+            const { mergeMicroPracticePdfs, zipMicroPracticePdfs } = await import('./paperGenerator');
+            const merged = await mergeMicroPracticePdfs(generatedFiles.map(f => f.filePath));
+            job.combinedPdfUrl = merged.pdfUrl;
+
+            const zipped = await zipMicroPracticePdfs(generatedFiles.map(f => ({
+              fileName: `${f.studentName.replace(/\s+/g, '_')}_${f.studentId}.pdf`,
+              filePath: f.filePath
+            })));
+            job.zipUrl = zipped.zipUrl;
+          } catch (err: any) {
+            console.error('Bulk combined PDF/ZIP creation failed:', err);
+          }
+        }
+
+        job.status = 'completed';
+      } catch (err: any) {
+        job.status = 'failed';
+        job.error = err?.message || 'Unknown error during bulk generation.';
+        console.error('Micro-practice bulk job failed:', err);
+      }
+    })();
+
+    res.status(202).json({
+      jobId,
+      total: job.total,
+      status: 'running',
+      progressUrl: `/api/practice/bulk-generate/${jobId}/progress`
+    });
+  });
+
+  // Poll a micro-practice bulk-generation job's progress. Returns results/
+  // combinedPdfUrl/zipUrl directly once status is 'completed' — no separate
+  // download route, since outputs are already static-served /output/... URLs
+  // (unlike /api/diagnostic/bulk's res.download() pattern).
+  app.get('/api/practice/bulk-generate/:jobId/progress', (req, res) => {
+    const job = microBulkJobs.get(req.params.jobId);
+    if (!job) return res.status(404).json({ error: 'Job not found.' });
+
+    res.json({
+      jobId: job.jobId,
+      total: job.total,
+      completed: job.completed,
+      status: job.status,
+      results: job.results,
+      combinedPdfUrl: job.combinedPdfUrl,
+      zipUrl: job.zipUrl,
+      error: job.error
+    });
+  });
+
+  // Looks up the real, generation-time answer key for a printed micro-practice
+  // paper by its paperId (embedded in the paper's QR code). Used by the manual
+  // answer-entry flow after a photo is uploaded and decoded — deliberately
+  // NOT re-running generateMicroSet, since its generators are unseeded random
+  // and would produce different questions/answers than what was printed.
+  app.get('/api/practice/paper/:paperId', async (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const paper = await dbStore.getMicroPracticePaperById(req.params.paperId);
+    if (!paper) return res.status(404).json({ error: 'Micro-practice paper not found.' });
+
+    const students = await dbStore.getStudents();
+    const student = students.find(s => s.id === paper.studentId);
+    if (student && !canAccessStudent(user, student)) {
+      return res.status(403).json({ error: 'Forbidden.' });
+    }
+
+    // Merge in any saved draft answers from the matching UploadedPaper record
+    // (a different collection, keyed by the same paperId) so the answer-entry
+    // screen can pre-fill a partially-completed session.
+    const uploadedPaper = await dbStore.getUploadedPaperByPaperId(req.params.paperId);
+    res.json({ ...paper, draftAnswers: uploadedPaper?.draftAnswers });
+  });
+
+  // Saves in-progress, ungraded answers against the matching UploadedPaper
+  // record so a teacher can resume grading later. Deliberately does not
+  // touch gradingStatus/gradedCompetencies — this is a raw draft, not a
+  // submission.
+  app.patch('/api/practice/paper/:paperId/save-draft', async (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { answers } = req.body;
+    if (!answers || typeof answers !== 'object') {
+      return res.status(400).json({ error: 'answers is required.' });
+    }
+
+    const uploadedPaper = await dbStore.getUploadedPaperByPaperId(req.params.paperId);
+    if (!uploadedPaper) return res.status(404).json({ error: 'Uploaded paper not found.' });
+
+    const students = await dbStore.getStudents();
+    const student = students.find(s => s.id === uploadedPaper.studentId);
+    if (student && !canAccessStudent(user, student)) {
+      return res.status(403).json({ error: 'Forbidden.' });
+    }
+
+    await dbStore.updateUploadedPaper(uploadedPaper.id, { draftAnswers: answers });
+    res.json({ success: true });
+  });
+
+  // Stores an uploaded photo of a completed micro-practice paper. No image
+  // processing/QR-decoding happens here — the frontend already decoded the
+  // paper's QR code before calling this; these fields are just echoed back
+  // (with the resolved competency added) so the frontend can hand off a
+  // fully-identified paper to the next step. Also persists an UploadedPaper
+  // record (gradingStatus: 'pending') when paperId + studentId are present,
+  // so an uploaded-but-ungraded paper can be found later via
+  // GET /api/practice/pending-papers instead of only living in-memory for
+  // the current browser session.
+  app.post('/api/practice/upload-paper', async (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { imageBase64, imageBase64s, filename, paperId, studentId, studentName, levelId, subIdx, sectionIndex, questionCount, uploadBatchId } = req.body;
+    const images: string[] = Array.isArray(imageBase64s) && imageBase64s.length > 0
+      ? imageBase64s
+      : (imageBase64 ? [imageBase64] : []);
+    if (images.length === 0) {
+      return res.status(400).json({ error: 'imageBase64 or imageBase64s is required.' });
+    }
+
+    if (studentId) {
+      const students = await dbStore.getStudents();
+      const student = students.find(s => s.id === studentId);
+      if (!student) return res.status(404).json({ error: 'Student not found.' });
+      if (!canAccessStudent(user, student)) return res.status(403).json({ error: 'Forbidden.' });
+    }
+
+    try {
+      const uploadsDir = path.join(ROOT_DIR, 'output', 'uploads');
+      fs.mkdirSync(uploadsDir, { recursive: true });
+
+      const safeStudentPart = studentId ? `_${String(studentId).replace(/[^a-zA-Z0-9_-]+/g, '')}` : '';
+      let savedFileName: string;
+      let savedFilePath: string;
+
+      if (images.length > 1) {
+        // Multiple page images belonging to one paper (a multi-page scan,
+        // all sharing the same paperId QR) — merge into a single PDF so
+        // nothing beyond page 1 is lost.
+        const { mergeImagesIntoPdf } = await import('./paperGenerator');
+        const mergedBuffer = await mergeImagesIntoPdf(images);
+        savedFileName = `paper${safeStudentPart}_${randomUUID()}.pdf`;
+        savedFilePath = path.join(uploadsDir, savedFileName);
+        fs.writeFileSync(savedFilePath, mergedBuffer);
+      } else {
+        const ext = path.extname(filename || 'paper.jpg') || '.jpg';
+        savedFileName = `paper${safeStudentPart}_${randomUUID()}${ext}`;
+        savedFilePath = path.join(uploadsDir, savedFileName);
+        const cleanBase64 = images[0].includes(',') ? images[0].split(',')[1] : images[0];
+        fs.writeFileSync(savedFilePath, Buffer.from(cleanBase64, 'base64'));
+      }
+
+      const imageUrl = `/output/uploads/${savedFileName}`;
+
+      let uploadedPaperId: string | null = null;
+      if (paperId && studentId) {
+        const sourcePaper = await dbStore.getMicroPracticePaperById(paperId);
+        const totalParts = sourcePaper?.parts?.length || 1;
+        const uploadedPaper: UploadedPaper = {
+          id: 'upl_' + randomUUID().slice(0, 8),
+          paperId,
+          studentId,
+          studentName: studentName || '',
+          imageUrl,
+          teacherId: user.id,
+          uploadedAt: new Date().toISOString(),
+          ...(uploadBatchId ? { uploadBatchId } : {}),
+          gradingStatus: 'pending',
+          totalParts,
+          gradedCompetencies: []
+        };
+        await dbStore.addUploadedPaper(uploadedPaper);
+        uploadedPaperId = uploadedPaper.id;
+      }
+
+      res.json({
+        success: true,
+        imageUrl,
+        uploadedPaperId,
+        paperId: paperId || null,
+        studentId: studentId || null,
+        studentName: studentName || null,
+        levelId: levelId != null ? Number(levelId) : null,
+        subIdx: subIdx != null ? Number(subIdx) : null,
+        sectionIndex: sectionIndex != null ? Number(sectionIndex) : null,
+        questionCount: questionCount != null ? Number(questionCount) : null,
+        competency: levelId != null ? getStrandForLevel(Number(levelId)) : null
+      });
+    } catch (err: any) {
+      console.error('Micro-practice paper upload failed:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Three-tier scoring/scheduling: >=80% advances currentSubLevel (capped at 2 —
+  // clearing sub-level 2 at a good score resolves the competency instead of
+  // advancing further) and doubles the interval (max 30 days); 50-79% is a "hold"
+  // tier — no change to subLevel or interval; <50% halves the interval (min 1 day)
+  // without moving subLevel backward.
+  function calculateNextScheduleState(
+    currentIntervalDays: number,
+    currentSubLevel: number,
+    correctCount: number,
+    totalCount: number
+  ): { intervalDays: number; subLevel: number; resolved: boolean } {
+    const scorePercent = totalCount > 0 ? (correctCount / totalCount) * 100 : 0;
+
+    if (scorePercent >= 80) {
+      const intervalDays = Math.min(30, currentIntervalDays * 2);
+      if (currentSubLevel >= 2) {
+        return { intervalDays, subLevel: currentSubLevel, resolved: true };
+      }
+      return { intervalDays, subLevel: currentSubLevel + 1, resolved: false };
+    }
+
+    if (scorePercent >= 50) {
+      return { intervalDays: currentIntervalDays, subLevel: currentSubLevel, resolved: false };
+    }
+
+    return { intervalDays: Math.max(1, Math.floor(currentIntervalDays / 2)), subLevel: currentSubLevel, resolved: false };
+  }
+
+  // IST has no DST, so a fixed +5:30 offset is exact — no timezone library
+  // needed. Returns the UTC instant corresponding to 00:00:00 IST on
+  // (fromDate + intervalDays), so a schedule becomes "due" from the start of
+  // its due day in IST, not at the exact time-of-day it was last graded.
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+  function nextDueDateIST(fromDate: Date, intervalDays: number): Date {
+    const istNow = new Date(fromDate.getTime() + IST_OFFSET_MS);
+    const istMidnightTarget = Date.UTC(
+      istNow.getUTCFullYear(),
+      istNow.getUTCMonth(),
+      istNow.getUTCDate() + intervalDays
+    );
+    return new Date(istMidnightTarget - IST_OFFSET_MS);
+  }
+
   app.post('/api/practice/generate/:studentId', async (req, res) => {
     const user = getAuthUser(req);
     if (!user || user.role !== UserRole.TEACHER) {
@@ -3541,30 +4180,6 @@ async function startServer() {
     const student = students.find(s => s.id === req.params.studentId);
     if (!student) return res.status(404).json({ error: 'Student not found.' });
 
-    // Find or create the schedule for this student+competency
-    const schedules = await dbStore.getPracticeSchedules();
-    let schedule: PracticeSchedule | undefined = schedules.find(
-      s => s.studentId === student.id && s.competency === competency
-    );
-
-    if (!schedule) {
-      schedule = {
-        id: 'sched_' + randomUUID().slice(0, 8),
-        studentId: student.id,
-        studentName: student.name,
-        teacherId: user.id,
-        competency,
-        intervalDays: 1,
-        nextDueDate: new Date().toISOString(),
-        createdAt: new Date().toISOString()
-      };
-      await dbStore.addPracticeSchedule(schedule);
-    }
-
-    // Build a genuinely varied question pool: scan a range of levels around
-    // the student's current level (not just the static seed bank, which only
-    // has a handful of questions total) using the existing level generator,
-    // then filter for topic/subtopic matches against the requested competency.
     const competencyLower = competency.toLowerCase();
     const isMatch = (q: Question) =>
       (q.topic || '').toLowerCase().includes(competencyLower) ||
@@ -3588,7 +4203,6 @@ async function startServer() {
       }
     }
 
-    // Also check the static seed bank for any additional matches not covered above.
     const allQuestions = await dbStore.getQuestions();
     for (const q of allQuestions) {
       if (isMatch(q) && !seenTexts.has(q.question) && pooled.length < 15) {
@@ -3597,33 +4211,21 @@ async function startServer() {
       }
     }
 
-    // Final fallback: if genuinely nothing matches this competency anywhere,
-    // use the student's current level directly rather than failing outright.
     const matched = pooled.length > 0
       ? pooled
       : generateQuestionsForLevel(student.currentLevel, student.currentSubLevel || 0);
 
-    // Shuffle lightly so repeated generations for the same competency don't
-    // always return the exact same 3-5 questions in the exact same order.
     const shuffled = [...matched].sort(() => Math.random() - 0.5);
     const selectedQuestions = shuffled.slice(0, 5);
     if (selectedQuestions.length === 0) {
       return res.status(400).json({ error: 'No suitable questions found for this competency.' });
     }
-
-    const assignment: MicroAssignment = {
-      id: 'ma_' + randomUUID().slice(0, 8),
-      scheduleId: schedule.id,
+    res.json({
       studentId: student.id,
       studentName: student.name,
       competency,
-      questions: selectedQuestions,
-      assignedAt: new Date().toISOString(),
-      totalCount: selectedQuestions.length
-    };
-    await dbStore.addMicroAssignment(assignment);
-
-    res.json({ schedule, assignment });
+      questions: selectedQuestions
+    });
   });
 
   // List practice items due today or overdue, scoped to the requesting
@@ -3645,53 +4247,136 @@ async function startServer() {
       scoped = [];
     }
 
-    const due = scoped.filter(s => new Date(s.nextDueDate) <= now);
+    const due = scoped.filter(s => !s.resolved && new Date(s.nextDueDate) <= now);
     res.json(due);
   });
 
-  // Submit results for a completed micro-assignment: grades against the
-  // stored answer key, updates the schedule's next due date using the simple
-  // interval-bump logic above.
-  app.post('/api/practice/:id/submit', async (req, res) => {
+  app.post('/api/practice/submit', async (req, res) => {
     const user = getAuthUser(req);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { answers } = req.body; // { [question_id]: "submitted answer" }
-    if (!answers) return res.status(400).json({ error: 'answers is required.' });
+    const { studentId, competency, questions, answers, paperId } = req.body;
+    if (!studentId || !competency || !Array.isArray(questions) || !answers) {
+      return res.status(400).json({ error: 'studentId, competency, questions, and answers are required.' });
+    }
 
-    const assignments = await dbStore.getMicroAssignments();
-    const assignment = assignments.find(a => a.id === req.params.id);
-    if (!assignment) return res.status(404).json({ error: 'Assignment not found.' });
-    if (assignment.completedAt) return res.status(400).json({ error: 'This assignment was already submitted.' });
+    const students = await dbStore.getStudents();
+    const student = students.find(s => s.id === studentId);
+    if (!student) return res.status(404).json({ error: 'Student not found.' });
 
+    // Find or create the schedule now, at actual submission time.
+    const schedules = await dbStore.getPracticeSchedules();
+    let schedule: PracticeSchedule | undefined = schedules.find(
+      s => s.studentId === studentId && s.competency === competency
+    );
+
+    if (!schedule) {
+      schedule = {
+        id: 'sched_' + randomUUID().slice(0, 8),
+        studentId,
+        studentName: student.name,
+        teacherId: user.id,
+        competency,
+        intervalDays: 1,
+        currentSubLevel: 0,
+        resolved: false,
+        nextDueDate: new Date().toISOString(),
+        createdAt: new Date().toISOString()
+      };
+      await dbStore.addPracticeSchedule(schedule);
+    }
+
+    // Grade the submitted answers against the questions passed back to us.
     let correctCount = 0;
-    assignment.questions.forEach(q => {
+    questions.forEach((q: Question) => {
       const submitted = (answers[q.question_id] || '').trim().toLowerCase();
+      if (q.answer_type === 'visual-confirm') {
+        if (submitted === 'yes') correctCount++;
+        return;
+      }
       const correct = q.answer.trim().toLowerCase();
       if (submitted === correct) correctCount++;
     });
 
     const now = new Date().toISOString();
-    await dbStore.updateMicroAssignment(assignment.id, { completedAt: now, correctCount });
 
-    const schedules = await dbStore.getPracticeSchedules();
-    const schedule = schedules.find(s => s.id === assignment.scheduleId);
-    if (schedule) {
-      const nextInterval = calculateNextInterval(schedule.intervalDays, correctCount, assignment.totalCount);
-      const nextDue = new Date(Date.now() + nextInterval * 24 * 60 * 60 * 1000);
-      await dbStore.updatePracticeSchedule(schedule.id, {
-        intervalDays: nextInterval,
-        nextDueDate: nextDue.toISOString(),
-        lastCompletedAt: now
-      });
+    const assignment: MicroAssignment = {
+      id: 'ma_' + randomUUID().slice(0, 8),
+      scheduleId: schedule.id,
+      studentId,
+      studentName: student.name,
+      competency,
+      questions,
+      assignedAt: now,
+      completedAt: now,
+      correctCount,
+      totalCount: questions.length
+    };
+    await dbStore.addMicroAssignment(assignment);
+
+    // Update the schedule's sub-level, resolved flag, and next due date together
+    // using the three-tier scoring logic.
+    const nextState = calculateNextScheduleState(
+      schedule.intervalDays,
+      schedule.currentSubLevel || 0,
+      correctCount,
+      questions.length
+    );
+    const nextDue = nextDueDateIST(new Date(), nextState.intervalDays);
+    await dbStore.updatePracticeSchedule(schedule.id, {
+      intervalDays: nextState.intervalDays,
+      currentSubLevel: nextState.subLevel,
+      resolved: nextState.resolved,
+      nextDueDate: nextDue.toISOString(),
+      lastCompletedAt: now
+    });
+
+    // If this submission is tied to an uploaded paper (paperId supplied),
+    // record this competency as graded and only flip the paper's overall
+    // gradingStatus to 'graded' once every part has been submitted —
+    // a 3-competency paper shouldn't drop off the pending list after just
+    // one of its parts is done.
+    if (paperId) {
+      const uploadedPaper = await dbStore.getUploadedPaperByPaperId(paperId);
+      if (uploadedPaper && uploadedPaper.gradingStatus !== 'graded') {
+        const gradedCompetencies = uploadedPaper.gradedCompetencies.includes(competency)
+          ? uploadedPaper.gradedCompetencies
+          : [...uploadedPaper.gradedCompetencies, competency];
+        const isFullyGraded = gradedCompetencies.length >= uploadedPaper.totalParts;
+        await dbStore.updateUploadedPaper(uploadedPaper.id, {
+          gradedCompetencies,
+          ...(isFullyGraded ? { gradingStatus: 'graded' as const, gradedAt: now } : {})
+        });
+      }
     }
 
     res.json({
       success: true,
       correctCount,
-      totalCount: assignment.totalCount,
-      scorePercent: Math.round((correctCount / assignment.totalCount) * 100)
+      totalCount: questions.length,
+      scorePercent: Math.round((correctCount / questions.length) * 100)
     });
+  });
+
+  // Papers that have been photographed/uploaded but not yet fully graded
+  // (see UploadedPaper in db.ts). Scoped the same way as /api/practice/due:
+  // teachers see their own uploads, admin-tier roles see everything, other
+  // roles get nothing since this feature is teacher-driven.
+  app.get('/api/practice/pending-papers', async (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const uploadedPapers = await dbStore.getUploadedPapers();
+
+    let scoped = uploadedPapers;
+    if (user.role === UserRole.TEACHER) {
+      scoped = uploadedPapers.filter(p => p.teacherId === user.id);
+    } else if (![UserRole.SUPERADMIN, UserRole.ADMIN, UserRole.DISTRICT_ADMIN, UserRole.BLOCK_ADMIN, UserRole.SCHOOL].includes(user.role)) {
+      scoped = [];
+    }
+
+    const pending = scoped.filter(p => p.gradingStatus === 'pending');
+    res.json(pending);
   });
 
   // Overview of all practiced competencies per student, independent of due

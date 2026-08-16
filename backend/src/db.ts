@@ -132,7 +132,7 @@ export interface Question {
   question_id: string;
   question: string;
   answer: string;
-  answer_type: 'text' | 'number' | 'choice';
+  answer_type: 'text' | 'number' | 'choice' | 'visual-confirm';
   choices?: string[];
   topic: string;
   subtopic: string;
@@ -140,6 +140,11 @@ export interface Question {
   source_level: number; // Mapping to mathematical level
   conceptId?: string; // Concept ID from 93-node framework (e.g. S1.1, S3.3)
   svgAsset?: string; // Standard pre-built SVG asset category
+  // For 'visual-confirm' questions: the deterministically-rendered SVG
+  // showing what the correct drawing should look like (e.g. tally marks for
+  // the stored correctAnswer count), shown next to the student's uploaded
+  // photo so the teacher can judge match/no-match instead of typing a value.
+  referenceImageSvg?: string;
 }
 
 /**
@@ -262,6 +267,8 @@ export interface PracticeSchedule {
   teacherId: string;
   competency: string;
   intervalDays: number;
+  currentSubLevel?: number; // 0, 1, or 2 — defaults to 0 for new schedules
+  resolved?: boolean;       // true once the student clears sub-level 2 with a good score
   nextDueDate: string;
   lastCompletedAt?: string;
   createdAt: string;
@@ -278,6 +285,81 @@ export interface MicroAssignment {
   completedAt?: string;
   correctCount?: number;
   totalCount: number;
+}
+
+/**
+ * One printed micro-practice paper's real, generation-time answer key.
+ * generateMicroSet's generators are randomized (Math.random(), no seeding),
+ * so the questions/answers actually printed on the paper can't be safely
+ * reconstructed by calling generateMicroSet again later — this record is
+ * what the manual answer-entry flow reads from instead. id is embedded in
+ * the paper's QR code so an uploaded photo can be matched back to the
+ * exact paper it came from (not just "a" paper matching the same
+ * student/level/section, which spaced repetition can regenerate more than
+ * once).
+ */
+/**
+ * One "Part N: <competency>" section within a multi-competency
+ * micro-practice paper (see generateMultiCompetencyMicroPaper).
+ */
+export interface MicroPracticePart {
+  competency: string;
+  levelId: number;
+  subIdx: number;
+  sectionIndex: number;
+  questionCount: number;
+  questions: Question[];
+}
+
+export interface MicroPracticePaper {
+  id: string;
+  studentId: string;
+  studentName: string;
+  pdfUrl: string;
+  createdAt: string;
+
+  // Multi-competency papers (generateMultiCompetencyMicroPaper): one entry
+  // per printed "Part N: <competency>" section.
+  parts?: MicroPracticePart[];
+
+  // Legacy single-competency shape (generateMicroPracticePaper /
+  // POST /api/students/:id/micro-practice/generate-pdf). Populated only
+  // when `parts` is absent — kept exactly as before so the existing GET
+  // /api/practice/paper/:paperId route and MicroPracticeAnswerEntry.tsx
+  // continue to work unchanged. Migrating those to read `parts` uniformly
+  // for both cases is a follow-up, not part of this change.
+  competency?: string | null;
+  levelId?: number;
+  subIdx?: number;
+  sectionIndex?: number;
+  questionCount?: number;
+  questions?: Question[];
+}
+
+/**
+ * Tracks a photographed/scanned completed micro-practice paper from the
+ * moment it's uploaded until it's fully graded. POST /api/practice/upload-paper
+ * used to just save the image and echo the QR payload back with no persisted
+ * record — this is that missing record, so teachers can leave an uploaded
+ * paper ungraded and come back to it later (GET /api/practice/pending-papers).
+ * totalParts/gradedCompetencies track multi-competency papers so the record
+ * only flips to 'graded' once every part has been submitted, not after the
+ * first one.
+ */
+export interface UploadedPaper {
+  id: string;
+  paperId: string;
+  studentId: string;
+  studentName: string;
+  imageUrl: string;
+  teacherId: string;
+  uploadedAt: string;
+  uploadBatchId?: string;
+  gradingStatus: 'pending' | 'graded';
+  gradedAt?: string;
+  totalParts: number;
+  gradedCompetencies: string[];
+  draftAnswers?: Record<number, Record<string, string>>;
 }
 
 export interface Ticket {
@@ -386,6 +468,8 @@ interface DatabaseSchema {
   diagnosticAnswerKeys: DiagnosticAnswerKey[];
   practiceSchedules: PracticeSchedule[];
   microAssignments: MicroAssignment[];
+  microPracticePapers: MicroPracticePaper[];
+  uploadedPapers: UploadedPaper[];
 }
 
 const COLLECTION_NAMES: Record<keyof DatabaseSchema, string> = {
@@ -408,6 +492,8 @@ const COLLECTION_NAMES: Record<keyof DatabaseSchema, string> = {
   diagnosticAnswerKeys: 'diagnostic_answer_keys',
   practiceSchedules: 'practice_schedules',
   microAssignments: 'micro_assignments',
+  microPracticePapers: 'micro_practice_papers',
+  uploadedPapers: 'uploaded_papers',
 };
 
 export class DBStore {
@@ -1085,6 +1171,42 @@ export class DBStore {
       if (idx !== -1) this.data.microAssignments[idx] = a;
     }
     return a || undefined;
+  }
+
+  async addMicroPracticePaper(paper: MicroPracticePaper) {
+    await this.mongoDb!.collection('microPracticePapers').insertOne(paper);
+    if (this.data) this.data.microPracticePapers.push(paper);
+    return paper;
+  }
+
+  async getMicroPracticePaperById(id: string) {
+    const p = await this.mongoDb!.collection<MicroPracticePaper>('microPracticePapers').findOne({ id });
+    return p || undefined;
+  }
+
+  async getUploadedPapers() {
+    return await this.mongoDb!.collection<UploadedPaper>('uploadedPapers').find({}).toArray();
+  }
+
+  async addUploadedPaper(paper: UploadedPaper) {
+    await this.mongoDb!.collection('uploadedPapers').insertOne(paper);
+    if (this.data) this.data.uploadedPapers.push(paper);
+    return paper;
+  }
+
+  async getUploadedPaperByPaperId(paperId: string) {
+    const p = await this.mongoDb!.collection<UploadedPaper>('uploadedPapers').findOne({ paperId });
+    return p || undefined;
+  }
+
+  async updateUploadedPaper(id: string, updates: Partial<UploadedPaper>) {
+    await this.mongoDb!.collection('uploadedPapers').updateOne({ id }, { $set: updates });
+    const p = await this.mongoDb!.collection<UploadedPaper>('uploadedPapers').findOne({ id });
+    if (p && this.data) {
+      const idx = this.data.uploadedPapers.findIndex(x => x.id === id);
+      if (idx !== -1) this.data.uploadedPapers[idx] = p;
+    }
+    return p || undefined;
   }
 
   // --- Diagnostic Answer Key Methods ---
@@ -3048,7 +3170,9 @@ export class DBStore {
       bestPractices,
       diagnosticAnswerKeys: [],
       practiceSchedules: [],
-      microAssignments: []
+      microAssignments: [],
+      microPracticePapers: [],
+      uploadedPapers: []
     };
   }
 }

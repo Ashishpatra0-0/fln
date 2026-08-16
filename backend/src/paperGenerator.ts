@@ -3,10 +3,11 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { randomUUID } from 'crypto';
-import { Question, dbStore } from './db';
+import { Question, dbStore, MicroPracticePart } from './db';
 import { renderBatch } from './worksheetRenderer';
 import { mergeAndStamp } from './pdfMerge';
-import { drawQrCode } from './qrCode';
+import { createQrDataUrl, drawQrCode } from './qrCode';
+import { mapCompetencyToLevel } from './flnLevels';
 import JSZip from 'jszip';
 
 // Resolve __dirname in ES Modules
@@ -423,6 +424,432 @@ body{font-family:'Segoe UI',Arial,sans-serif;margin:0;background:#fff;color:var(
   } finally {
     await browser.close();
   }
+}
+
+export interface MicroPracticePaperResult {
+  fileName: string;
+  filePath: string;
+  pdfUrl: string;
+  questions: Question[];
+  paperId: string;
+}
+
+// Classifies a micro-practice answer's stored TYPE for the frontend answer-entry
+// form. Based on the actual correctAnswer VALUE, not just the generator's internal
+// answerType label — fill-blank in particular produces numbers, comparison symbols
+// (<, >, =), fractions ("3/4"), comma-joined lists, time strings, and even
+// {tens, ones}-style objects, so a blanket "fill-blank -> number" mapping would
+// route several of those into a numeric-only input. circle-choice can carry an
+// array of correct indices (multi-select, e.g. "circle all right angles") — that
+// doesn't fit 'choice' any better than it fits 'number', but 'choice' is the
+// least-wrong of the three; representing multi-select answers properly is a
+// follow-up for the manual-entry/scoring parts, not solved here.
+function inferAnswerType(item: any): 'text' | 'number' | 'choice' | 'visual-confirm' {
+  if (item.answerType === 'mcq' || item.answerType === 'circle-choice') return 'choice';
+  // draw-count sections (e.g. frequency-tally-table, count-and-tally) carry a
+  // pre-rendered referenceImageSvg (attached in generateMicroSet) instead of
+  // a typed value — graded by the teacher visually comparing it to the
+  // student's photo, not by string comparison.
+  if (item.answerType === 'draw-count') return 'visual-confirm';
+  const val = item.correctAnswer;
+  if (typeof val === 'number') return 'number';
+  if (typeof val === 'string' && /^-?\d+(\.\d+)?$/.test(val.trim())) return 'number';
+  return 'text';
+}
+
+/**
+ * Generate a single-section, lightweight micro-practice PDF for one student:
+ * drives Puppeteer against the same levels_main.html the full worksheet
+ * generator uses, but calls generateMicroSet (one section, once) instead of
+ * generateOneSet (full multi-section worksheet).
+ */
+export async function generateMicroPracticePaper({
+  studentId,
+  studentName,
+  levelId,
+  subIdx,
+  sectionIndex,
+  questionCount
+}: {
+  studentId: string;
+  studentName: string;
+  levelId: number;
+  subIdx: number;
+  sectionIndex: number;
+  questionCount: number;
+}): Promise<MicroPracticePaperResult> {
+  const { launchBrowser } = await import('./browser');
+  const browser = await launchBrowser();
+
+  try {
+    const page = await browser.newPage();
+    const worksheetAssetsDir =
+      process.env.WORKSHEET_ASSETS_DIR ||
+      path.resolve(__dirname, "..", "..", "frontend", "public", "worksheets");
+    const htmlPath = path.join(worksheetAssetsDir, "levels_main.html");
+    await page.goto(`file://${htmlPath}`, { waitUntil: 'networkidle0' as any, timeout: 30000 });
+
+    const data = await page.evaluate(({ levelId, subIdx, sectionIndex, questionCount, studentId, studentName }) => {
+      const doc = (globalThis as any).document;
+      const nameInput = doc.getElementById('studentName');
+      const idInput = doc.getElementById('studentId');
+      if (nameInput) nameInput.value = studentName;
+      if (idInput) idInput.value = studentId;
+      // @ts-ignore — generateMicroSet is a global defined in levels_main.html
+      return generateMicroSet(levelId, subIdx, sectionIndex, questionCount);
+    }, { levelId, subIdx, sectionIndex, questionCount, studentId, studentName });
+
+    await page.close();
+
+    if (data.error) {
+      throw new Error(data.error);
+    }
+
+    const paperId = randomUUID();
+    const qrDataUrl = createQrDataUrl({ paperId, studentId, studentName, levelId, subIdx, sectionIndex, questionCount });
+
+    const printPage = await browser.newPage();
+    const styleBlock = `
+:root{--ink:#1a1a1a;--paper:#ffffff;--accent:#2f6fed;--muted:#666;--line:#c9c9c9;--panel:#f4f6f9;--danger:#d33;--good:#1a8a4a;}
+*{box-sizing:border-box;}
+body{font-family:'Segoe UI',Arial,sans-serif;margin:0;background:#fff;color:var(--ink);}
+.page-wrapper{position:relative;background:var(--paper);width:794px;min-height:1123px;padding:34px 30px;}
+.page-header{display:flex;justify-content:space-between;align-items:baseline;border-bottom:2px solid var(--ink);padding-bottom:6px;margin-bottom:14px;}
+.page-header h1{font-size:18px;margin:0;}
+.page-header .sub{font-size:12px;color:var(--muted);}
+.section{margin-bottom:20px;}
+.section h3{font-size:14px;background:#eef2fb;padding:6px 8px;border-left:4px solid var(--accent);margin:0 0 8px 0;page-break-after:avoid;}
+.instr{font-size:12.5px;color:#333;margin:0 0 8px 2px;font-style:italic;}
+.q-list{display:flex;flex-direction:column;gap:8px;}
+.q-row{display:flex;align-items:center;gap:10px;font-size:14px;flex-wrap:wrap;page-break-inside:avoid;}
+.q-num{font-weight:700;min-width:20px;}
+.ans-box{border:1.5px solid var(--ink);border-radius:4px;min-width:44px;height:28px;padding:2px 6px;text-align:center;font-size:14px;display:inline-flex;align-items:center;justify-content:center;}
+.ans-box.wide{min-width:90px;}
+.icon-row{display:inline-flex;gap:3px;flex-wrap:wrap;vertical-align:middle;}
+.ic{display:inline-block;vertical-align:middle;}
+.mcq-options{display:flex;gap:12px;flex-wrap:wrap;margin-left:4px;}
+.match-grid{display:grid;grid-template-columns:1fr 90px 1fr;align-items:stretch;}
+.match-item{border:1px dashed var(--line);border-radius:6px;padding:8px;min-height:40px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.match-dot{width:12px;height:12px;border-radius:50%;border:2px solid var(--ink);background:#fff;flex-shrink:0;}
+.footer-stamp{position:absolute;bottom:10px;right:16px;font-family:'Courier New',monospace;font-size:9px;color:#888;}
+@media print{body{background:#fff;}.page-wrapper{box-shadow:none;margin:0;}}
+@page{margin:0;size:A4;}
+    `;
+
+    const wrappedHtml = `<!DOCTYPE html><html><head><style>${styleBlock}</style></head><body>
+      <div class="page-wrapper">
+        <div style="position:relative;min-height:22mm;margin-bottom:4px;">
+          <img src="${qrDataUrl}" alt="Micro-practice QR" style="position:absolute;top:0;right:0;width:18mm;height:18mm;" />
+        </div>
+        ${data.html}
+        <div class="footer-stamp">Micro-Practice · Student ID: ${studentId} · ${new Date().toLocaleDateString()}</div>
+      </div>
+    </body></html>`;
+
+    await printPage.setContent(wrappedHtml, { waitUntil: 'networkidle0' as any, timeout: 15000 });
+    await printPage.setViewport({ width: 794, height: 1123 });
+
+    const pdfBuffer = await printPage.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' },
+      displayHeaderFooter: false,
+      preferCSSPageSize: true
+    });
+
+    await printPage.close();
+
+    const questions: Question[] = [];
+    if (data.answerKey && Array.isArray(data.answerKey.items)) {
+      data.answerKey.items.forEach((item: any, idx: number) => {
+        const answerStr = item.correctAnswer != null
+          ? (typeof item.correctAnswer === 'object' ? JSON.stringify(item.correctAnswer) : String(item.correctAnswer))
+          : '';
+        questions.push({
+          question_id: `${studentId}_${item.questionId}`,
+          question: item.coordHint || `Question ${idx + 1}: ${item.sectionName || 'Micro-Practice'}`,
+          answer: answerStr,
+          answer_type: inferAnswerType(item),
+          topic: item.sectionName || `Section ${sectionIndex + 1}`,
+          subtopic: item.sectionId || 'subtopic',
+          difficulty: 'medium',
+          source_level: levelId,
+          referenceImageSvg: item.referenceImageSvg
+        });
+      });
+    }
+
+    const fileName = `micro_${levelId}_${subIdx}_sec${sectionIndex}_student_${studentId}_${randomUUID()}.pdf`;
+    const filePath = path.join(OUTPUT_DIR, fileName);
+    fs.writeFileSync(filePath, pdfBuffer);
+
+    return {
+      fileName,
+      filePath,
+      pdfUrl: `/output/${fileName}`,
+      questions,
+      paperId
+    };
+  } finally {
+    await browser.close();
+  }
+}
+
+export interface MultiCompetencyMicroPaperResult {
+  fileName: string;
+  filePath: string;
+  pdfUrl: string;
+  paperId: string;
+  parts: MicroPracticePart[];
+}
+
+/**
+ * Generate ONE combined micro-practice PDF covering multiple weak
+ * competencies for a single student, each as a labeled "Part N: <competency>"
+ * section. Reuses generateMicroSet once per competency against the SAME
+ * loaded levels_main.html page (one navigation, N evaluate calls) rather
+ * than reloading per part. Sub-level and section index use the same
+ * "start from the basics" defaults as the single-competency flow (0, 0).
+ */
+export async function generateMultiCompetencyMicroPaper({
+  studentId,
+  studentName,
+  competencies,
+  questionsPerCompetency
+}: {
+  studentId: string;
+  studentName: string;
+  competencies: string[];
+  questionsPerCompetency: number;
+}): Promise<MultiCompetencyMicroPaperResult> {
+  if (!Array.isArray(competencies) || competencies.length === 0) {
+    throw new Error('competencies must be a non-empty array.');
+  }
+
+  const { launchBrowser } = await import('./browser');
+  const browser = await launchBrowser();
+
+  try {
+    const page = await browser.newPage();
+    const worksheetAssetsDir =
+      process.env.WORKSHEET_ASSETS_DIR ||
+      path.resolve(__dirname, "..", "..", "frontend", "public", "worksheets");
+    const htmlPath = path.join(worksheetAssetsDir, "levels_main.html");
+    await page.goto(`file://${htmlPath}`, { waitUntil: 'networkidle0' as any, timeout: 30000 });
+
+    await page.evaluate(({ studentId, studentName }) => {
+      const doc = (globalThis as any).document;
+      const nameInput = doc.getElementById('studentName');
+      const idInput = doc.getElementById('studentId');
+      if (nameInput) nameInput.value = studentName;
+      if (idInput) idInput.value = studentId;
+    }, { studentId, studentName });
+
+    const parts: MicroPracticePart[] = [];
+    const partSectionsHtml: string[] = [];
+
+    for (let i = 0; i < competencies.length; i++) {
+      const competency = competencies[i];
+      const levelId = mapCompetencyToLevel(competency);
+      if (levelId == null) {
+        throw new Error(`No level found for competency "${competency}".`);
+      }
+      const subIdx = 0;
+      const sectionIndex = 0;
+
+      const data = await page.evaluate(({ levelId, subIdx, sectionIndex, questionCount }) => {
+        // @ts-ignore — generateMicroSet is a global defined in levels_main.html
+        return generateMicroSet(levelId, subIdx, sectionIndex, questionCount, { skipHeader: true });
+      }, { levelId, subIdx, sectionIndex, questionCount: questionsPerCompetency });
+
+      if (data.error) {
+        throw new Error(`Part ${i + 1} (${competency}): ${data.error}`);
+      }
+
+      const questions: Question[] = [];
+      if (data.answerKey && Array.isArray(data.answerKey.items)) {
+        data.answerKey.items.forEach((item: any, idx: number) => {
+          const answerStr = item.correctAnswer != null
+            ? (typeof item.correctAnswer === 'object' ? JSON.stringify(item.correctAnswer) : String(item.correctAnswer))
+            : '';
+          questions.push({
+            question_id: `${studentId}_part${i + 1}_${item.questionId}`,
+            question: item.coordHint || `Question ${idx + 1}: ${item.sectionName || competency}`,
+            answer: answerStr,
+            answer_type: inferAnswerType(item),
+            topic: item.sectionName || competency,
+            subtopic: item.sectionId || 'subtopic',
+            difficulty: 'medium',
+            source_level: levelId,
+            referenceImageSvg: item.referenceImageSvg
+          });
+        });
+      }
+
+      parts.push({ competency, levelId, subIdx, sectionIndex, questionCount: questionsPerCompetency, questions });
+      partSectionsHtml.push(`
+        <div style="font-size:16px;font-weight:800;margin:18px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--ink);">Part ${i + 1}: ${competency} · ${data.meta.title} · Level ${data.meta.sublevelId}</div>
+        ${data.html}
+      `);
+    }
+
+    await page.close();
+
+    const paperId = randomUUID();
+    // Just the paperId (+ student identity for the confirm-screen message) —
+    // the full multi-part question list is looked up from the stored
+    // MicroPracticePaper record, not encoded in the QR itself.
+    const qrDataUrl = createQrDataUrl({ paperId, studentId, studentName });
+
+    const printPage = await browser.newPage();
+    const styleBlock = `
+:root{--ink:#1a1a1a;--paper:#ffffff;--accent:#2f6fed;--muted:#666;--line:#c9c9c9;--panel:#f4f6f9;--danger:#d33;--good:#1a8a4a;}
+*{box-sizing:border-box;}
+body{font-family:'Segoe UI',Arial,sans-serif;margin:0;background:#fff;color:var(--ink);}
+.page-wrapper{position:relative;background:var(--paper);width:794px;padding:34px 30px;}
+.page-header{display:flex;justify-content:space-between;align-items:baseline;border-bottom:2px solid var(--ink);padding-bottom:6px;margin-bottom:14px;}
+.page-header h1{font-size:18px;margin:0;}
+.page-header .sub{font-size:12px;color:var(--muted);}
+.section{margin-bottom:20px;}
+.section h3{font-size:14px;background:#eef2fb;padding:6px 8px;border-left:4px solid var(--accent);margin:0 0 8px 0;page-break-after:avoid;}
+.instr{font-size:12.5px;color:#333;margin:0 0 8px 2px;font-style:italic;}
+.q-list{display:flex;flex-direction:column;gap:8px;}
+.q-row{display:flex;align-items:center;gap:10px;font-size:14px;flex-wrap:wrap;page-break-inside:avoid;}
+.q-num{font-weight:700;min-width:20px;}
+.ans-box{border:1.5px solid var(--ink);border-radius:4px;min-width:44px;height:28px;padding:2px 6px;text-align:center;font-size:14px;display:inline-flex;align-items:center;justify-content:center;}
+.ans-box.wide{min-width:90px;}
+.icon-row{display:inline-flex;gap:3px;flex-wrap:wrap;vertical-align:middle;}
+.ic{display:inline-block;vertical-align:middle;}
+.mcq-options{display:flex;gap:12px;flex-wrap:wrap;margin-left:4px;}
+.match-grid{display:grid;grid-template-columns:1fr 90px 1fr;align-items:stretch;}
+.match-item{border:1px dashed var(--line);border-radius:6px;padding:8px;min-height:40px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.match-dot{width:12px;height:12px;border-radius:50%;border:2px solid var(--ink);background:#fff;flex-shrink:0;}
+.match-label{font-weight:700;font-size:12px;color:var(--muted);min-width:16px;text-align:center;}
+@media print{body{background:#fff;}.page-wrapper{box-shadow:none;margin:0;}}
+    `;
+
+    // The QR and the footer stamp are rendered via Puppeteer's native
+    // per-page headerTemplate/footerTemplate (not in-body position:fixed)
+    // so they repeat correctly on every page. Two things were tested and
+    // ruled out first: (1) a JS margin.top on printPage.pdf() alone is a
+    // no-op here — preferCSSPageSize + this page's own @page{margin:0} rule
+    // takes priority over it; only a real @page{margin-top} in the CSS (or,
+    // as used here, the header/footer-template path, which honors the JS
+    // margin option by design) actually reserves space on every page.
+    // (2) compensating the QR's own position:fixed offset to counteract a
+    // CSS @page margin shift (via a negative `top` or a `transform`)
+    // produces broken/duplicated rendering in Chromium's print pipeline —
+    // not just misalignment. headerTemplate avoids that whole problem: its
+    // coordinate system starts at the true page edge, so `top:9mm` there
+    // reproduces the QR's original on-page position exactly, with no
+    // compensation math needed, while still letting `margin.top` reserve
+    // real space in the body's normal flow on every page.
+    const wrappedHtml = `<!DOCTYPE html><html><head><style>${styleBlock}</style></head><body>
+      <div class="page-wrapper">
+        <div class="page-header">
+          <div><h1>Micro-Practice — Multiple Competencies</h1><span class="sub">${competencies.join(', ')}</span></div>
+          <div style="text-align:right;font-size:12px;"><div><b>${studentName}</b></div><div>${studentId}</div></div>
+        </div>
+        ${partSectionsHtml.join('')}
+      </div>
+    </body></html>`;
+
+    await printPage.setContent(wrappedHtml, { waitUntil: 'networkidle0' as any, timeout: 15000 });
+    await printPage.setViewport({ width: 794, height: 1123 });
+
+    // top must clear the QR's own footprint (9mm offset + 18mm size = 27mm)
+    // on every page; bottom leaves room for the footer stamp.
+    const headerTemplate = `<div style="width:100%;font-size:0;position:relative;">
+      <img src="${qrDataUrl}" style="position:absolute;top:9mm;right:8mm;width:18mm;height:18mm;" />
+    </div>`;
+    const footerTemplate = `<div style="width:100%;font-size:9px;font-family:'Courier New',monospace;color:#888;text-align:right;padding-right:8mm;">
+      Micro-Practice · Student ID: ${studentId} · ${new Date().toLocaleDateString()}
+    </div>`;
+
+    const pdfBuffer = await printPage.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '27mm', right: '0mm', bottom: '12mm', left: '0mm' },
+      displayHeaderFooter: true,
+      headerTemplate,
+      footerTemplate
+    });
+
+    await printPage.close();
+
+    const fileName = `micro_multi_${competencies.length}parts_student_${studentId}_${randomUUID()}.pdf`;
+    const filePath = path.join(OUTPUT_DIR, fileName);
+    fs.writeFileSync(filePath, pdfBuffer);
+
+    return {
+      fileName,
+      filePath,
+      pdfUrl: `/output/${fileName}`,
+      paperId,
+      parts
+    };
+  } finally {
+    await browser.close();
+  }
+}
+
+/**
+ * Merges multiple already-generated PDF files (e.g. one per student from a
+ * bulk-generate run) into a single combined PDF, back-to-back in the order
+ * given. Used by POST /api/practice/bulk-generate.
+ */
+export async function mergeMicroPracticePdfs(pdfFilePaths: string[]): Promise<{ fileName: string; filePath: string; pdfUrl: string }> {
+  const mergedPdf = await PDFDocument.create();
+  for (const srcPath of pdfFilePaths) {
+    const bytes = fs.readFileSync(srcPath);
+    const doc = await PDFDocument.load(bytes);
+    const copiedPages = await mergedPdf.copyPages(doc, doc.getPageIndices());
+    copiedPages.forEach(page => mergedPdf.addPage(page));
+  }
+  const mergedBytes = await mergedPdf.save();
+  const fileName = `bulk_combined_${randomUUID()}.pdf`;
+  const filePath = path.join(OUTPUT_DIR, fileName);
+  fs.writeFileSync(filePath, Buffer.from(mergedBytes));
+  return { fileName, filePath, pdfUrl: `/output/${fileName}` };
+}
+
+/**
+ * Merges page images (PNG data URLs) into a single multi-page PDF, one page
+ * per image. Used by POST /api/practice/upload-paper when a scanned paper
+ * spans multiple physical pages (all sharing the same paperId QR) — instead
+ * of only keeping the first page's image, every page is preserved so
+ * grading later can see the student's full handwritten answers.
+ */
+export async function mergeImagesIntoPdf(imageDataUrls: string[]): Promise<Buffer> {
+  const pdfDoc = await PDFDocument.create();
+  const A4_WIDTH = 595.28;
+  const A4_HEIGHT = 841.89;
+  for (const dataUrl of imageDataUrls) {
+    const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+    const imageBytes = Buffer.from(base64, 'base64');
+    const image = await pdfDoc.embedPng(imageBytes);
+    const page = pdfDoc.addPage([A4_WIDTH, A4_HEIGHT]);
+    page.drawImage(image, { x: 0, y: 0, width: A4_WIDTH, height: A4_HEIGHT });
+  }
+  const bytes = await pdfDoc.save();
+  return Buffer.from(bytes);
+}
+
+/**
+ * Zips a set of already-generated PDF files, one entry per student, so
+ * individual papers can be handled/printed separately. Used by
+ * POST /api/practice/bulk-generate.
+ */
+export async function zipMicroPracticePdfs(entries: { fileName: string; filePath: string }[]): Promise<{ fileName: string; filePath: string; zipUrl: string }> {
+  const zip = new JSZip();
+  for (const entry of entries) {
+    zip.file(entry.fileName, fs.readFileSync(entry.filePath));
+  }
+  const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+  const fileName = `bulk_papers_${randomUUID()}.zip`;
+  const filePath = path.join(OUTPUT_DIR, fileName);
+  fs.writeFileSync(filePath, zipBuffer);
+  return { fileName, filePath, zipUrl: `/output/${fileName}` };
 }
 
 /**
