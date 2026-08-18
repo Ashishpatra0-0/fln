@@ -582,6 +582,23 @@ function fractionBarSVG(parts, shaded, width, height){
   return `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" class="ic">${cells}</svg>`;
 }
 
+function fractionSquareGridSVG(parts, shaded, size){
+  size = size || 90;
+  const cols = Math.ceil(Math.sqrt(parts));
+  const rows = Math.ceil(parts/cols);
+  const gap = 3;
+  const cellW = (size-(cols-1)*gap)/cols;
+  const cellH = (size-(rows-1)*gap)/rows;
+  let cells='';
+  for(let i=0;i<parts;i++){
+    const row = Math.floor(i/cols), col = i%cols;
+    const x = col*(cellW+gap), y = row*(cellH+gap);
+    const fill = i<shaded ? '#1a1a1a' : '#fff';
+    cells += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${cellW.toFixed(1)}" height="${cellH.toFixed(1)}" fill="${fill}" stroke="#1a1a1a" stroke-width="1.4"/>`;
+  }
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" class="ic">${cells}</svg>`;
+}
+
 function fractionCompleteSVG(parts, shownCount, qid, size){
   size = size || 90;
   const cx=size/2, cy=size/2, r=size*0.42;
@@ -2011,7 +2028,7 @@ GENERATORS['division-complete-picture'] = (p,subIdx,qc,sid,sname) => {
       <div>One group is shown. Draw the remaining ${groups-1} equal group(s).</div>
       <div>${shownGroup}${blankGroups}</div>
     </div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'draw-count',{groups,perGroup},'remaining group(s) drawn matching the shown group',ICR_DETECT_MAP['draw-count']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'draw-count',{groups,perGroup,icon:ic},'remaining group(s) drawn matching the shown group',ICR_DETECT_MAP['draw-count']));
   }
   return {html:`<p class="instr">Complete the picture by drawing the remaining equal groups.</p><div>${rows}</div>`, answers};
 };
@@ -2044,14 +2061,14 @@ GENERATORS['fractions-identify'] = (p,subIdx,qc,sid,sname) => {
 GENERATORS['fraction-identify-visual'] = (p,subIdx,qc,sid,sname) => {
   const n = p.n || 5;
   const bank = p.fractions || FRACTION_BANK;
-  const shapeTypes = p.shapeTypes || ['circle','bar'];
+  const shapeTypes = p.shapeTypes || ['circle','bar','square'];
   let rows='', answers=[];
   const chosen = sampleCycled(bank, n);
   for(let i=0;i<n;i++){
     const qid=qidOf(qc);
     const f = chosen[i];
     const shapeType = pick(shapeTypes);
-    const visual = shapeType==='circle' ? fractionCircleSVG(f.den, f.num, 90) : fractionBarSVG(f.den, f.num, 170, 36);
+    const visual = shapeType==='circle' ? fractionCircleSVG(f.den, f.num, 90) : shapeType==='square' ? fractionSquareGridSVG(f.den, f.num, 90) : fractionBarSVG(f.den, f.num, 170, 36);
     rows += `<div class="q-row" style="gap:16px;"><span class="q-num">${i+1}.</span>${visual}<span>Fraction shaded = </span><span class="ans-box wide" data-omr="${qid}-frac"></span></div>`;
     answers.push(makeAnsItem(qid,sid,sname,i+1,'fill-blank',`${f.num}/${f.den}`,'fraction written in box (e.g. 1/2)',ICR_DETECT_MAP['fill-blank']));
   }
@@ -2067,8 +2084,8 @@ GENERATORS['fraction-picture-match'] = (p,subIdx,qc,sid,sname) => {
   let leftItems='', rightItems='', answers=[];
   items.forEach((f,i)=>{
     const qid=qidOf(qc);
-    const shapeType = pick(['circle','bar']);
-    const visual = shapeType==='circle' ? fractionCircleSVG(f.den, f.num, 60) : fractionBarSVG(f.den, f.num, 120, 26);
+    const shapeType = pick(['circle','bar','square']);
+    const visual = shapeType==='circle' ? fractionCircleSVG(f.den, f.num, 60) : shapeType==='square' ? fractionSquareGridSVG(f.den, f.num, 60) : fractionBarSVG(f.den, f.num, 120, 26);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:${rowH}px;height:${rowH}px;box-sizing:border-box;"><span class="match-label">${i+1}</span><div class="match-content">${visual}</div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
     answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the picture to its matching fraction`, ICR_DETECT_MAP['match-line']));
@@ -2153,8 +2170,8 @@ GENERATORS['fraction-target-choice'] = (p,subIdx,qc,sid,sname) => {
     const options = shuffle([target, ...distractors]);
     const correctIdx = options.findIndex(o=>o.num===target.num && o.den===target.den);
     const optsHtml = options.map((f,idx)=>{
-      const shapeType = pick(['circle','bar']);
-      const visual = shapeType==='circle' ? fractionCircleSVG(f.den,f.num,56) : fractionBarSVG(f.den,f.num,90,24);
+      const shapeType = pick(['circle','bar','square']);
+      const visual = shapeType==='circle' ? fractionCircleSVG(f.den,f.num,56) : shapeType==='square' ? fractionSquareGridSVG(f.den,f.num,56) : fractionBarSVG(f.den,f.num,90,24);
       return `<span class="circle-target" data-omr="${qid}-opt${idx}">${visual}</span>`;
     }).join('');
     rows += `<div class="q-row" style="gap:14px;"><span class="q-num">${i+1}.</span>${optsHtml}</div>`;
@@ -8407,17 +8424,19 @@ const MICRO_PRACTICE_EXCLUDED_TYPES = new Set([
   'symmetry-draw-line', 'symmetry-draw-one-line',
   // answerType 'draw-count' — answer is a hand-drawn count/pattern
   // (shading, tally marks, completed pattern), not a written value.
-  // frequency-tally-table and count-and-tally are DELIBERATELY not listed
-  // here anymore — they're supported via the 'visual-confirm' answer type
-  // (see DRAW_COUNT_REFERENCE_RENDERERS below): the teacher is shown a
-  // rendered reference image of the correct drawing next to the student's
-  // photo and clicks Yes/No, instead of the answer being auto-graded. The
-  // rest of this category stays excluded until each is individually checked
-  // for a viable reference-image renderer.
-  'pattern-complete', 'division-complete-picture', 'fraction-complete-whole',
-  'fraction-colour-target', 'fraction-color-result', 'decimal-shade-strip',
-  'symmetry-complete-half', 'symmetry-complete-half-grid',
-  'pattern-shape-blanks', 'pattern-table-single-blank'
+  // frequency-tally-table, count-and-tally, fraction-complete-whole,
+  // fraction-colour-target, fraction-color-result, pattern-shape-blanks,
+  // pattern-table-single-blank, symmetry-complete-half, and
+  // division-complete-picture are DELIBERATELY not listed here anymore —
+  // they're supported via the 'visual-confirm' answer type (see
+  // DRAW_COUNT_REFERENCE_RENDERERS below): the teacher is shown a rendered
+  // reference image of the correct drawing next to the student's photo and
+  // clicks Yes/No, instead of the answer being auto-graded. pattern-complete
+  // stays excluded — it's dead code, never referenced by any level, not
+  // worth a reference renderer until it's actually wired up. The rest of
+  // this category stays excluded until each is individually checked for a
+  // viable reference-image renderer.
+  'pattern-complete', 'decimal-shade-strip', 'symmetry-complete-half-grid'
 ]);
 
 // For draw-count sections that HAVE a deterministic rendering helper for
@@ -8429,7 +8448,30 @@ const MICRO_PRACTICE_EXCLUDED_TYPES = new Set([
 // visual Yes/No judgment instead of automated grading.
 const DRAW_COUNT_REFERENCE_RENDERERS = {
   'frequency-tally-table': (correctAnswer) => tallyMarksSVG(Number(correctAnswer), 40),
-  'count-and-tally': (correctAnswer) => tallyMarksSVG(Number(correctAnswer), 40)
+  'count-and-tally': (correctAnswer) => tallyMarksSVG(Number(correctAnswer), 40),
+  // The reference must show the WHOLE fully completed (every part shaded),
+  // not just the `missing` part(s) the student adds — so shownCount is
+  // always `den`, not `den - missing`.
+  'fraction-complete-whole': (correctAnswer) => fractionCompleteSVG(correctAnswer.den, correctAnswer.den, 'ref', 90),
+  'fraction-colour-target': (correctAnswer) => fractionCompleteSVG(correctAnswer.den, correctAnswer.num, 'ref', 90),
+  'fraction-color-result': (correctAnswer) => fractionCompleteSVG(correctAnswer.den, correctAnswer.num, 'ref', 90),
+  // correctAnswer is an array of shape keys (2-5 blanks) — render each with
+  // the same deterministic icon() lookup used to print the question itself.
+  'pattern-shape-blanks': (correctAnswer) => correctAnswer.map(name => icon(name, 34)).join(''),
+  'pattern-table-single-blank': (correctAnswer) => icon(correctAnswer, 50),
+  // halfCompleteDrawableSVG only draws the half-shown + blank-other-half (no
+  // "completed" mode), so this reuses the plain icon() lookup instead — the
+  // pool (butterfly, heart, diamond, hexagon, square) is all bilaterally
+  // symmetric shapes, so the full uncut icon IS the correct completed figure.
+  'symmetry-complete-half': (correctAnswer) => icon(correctAnswer, 96),
+  // correctAnswer now carries the actual icon shown on the printed page
+  // (added alongside this renderer — previously only {groups,perGroup} was
+  // stored, which wasn't enough to reproduce the real picture). Reference
+  // shows ALL `groups` groups fully filled, in the same bordered-box style
+  // as the printed page's own "shown group".
+  'division-complete-picture': (correctAnswer) => Array.from({length: correctAnswer.groups}).map(() =>
+    `<div style="border:1.5px solid #1a1a1a;border-radius:8px;padding:4px;display:inline-block;margin:2px;">${iconRow(correctAnswer.icon, correctAnswer.perGroup, 18)}</div>`
+  ).join('')
 };
 
 /* Builds a single-section, single-page micro-practice set: looks up the

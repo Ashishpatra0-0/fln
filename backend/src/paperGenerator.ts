@@ -7,7 +7,6 @@ import { Question, dbStore, MicroPracticePart } from './db';
 import { renderBatch } from './worksheetRenderer';
 import { mergeAndStamp } from './pdfMerge';
 import { createQrDataUrl, drawQrCode } from './qrCode';
-import { mapCompetencyToLevel } from './flnLevels';
 import JSZip from 'jszip';
 
 // Resolve __dirname in ES Modules
@@ -457,6 +456,44 @@ function inferAnswerType(item: any): 'text' | 'number' | 'choice' | 'visual-conf
   return 'text';
 }
 
+// Puppeteer's headerTemplate/footerTemplate render identically on every
+// page and there is no reliable way to distinguish page 1 from later pages
+// from within a single shared template — confirmed by direct testing:
+// <script> tags inside header/footer templates never execute (a placeholder
+// string left untouched proved this), and the auto-populated .pageNumber
+// text is a print-time-only substitution invisible to any script running in
+// that same context, so there's no JS or CSS path to branch on it either.
+//
+// This renders the PDF with a page-1 header (no continuation divider) once,
+// and only if the result is more than one page, renders AGAIN with a
+// continuation-page header (divider included) restricted to pages 2..N via
+// pageRanges, then splices the two together with pdf-lib. The first render
+// doubles as the final single-page result when there's nothing to splice —
+// single-page papers (the common case) cost exactly one render. An explicit
+// end bound is always used for pageRanges: an open-ended '2-' throws
+// "Page range exceeds page count" when there is no page 2.
+async function renderPdfWithContinuationDivider(
+  printPage: any,
+  pdfOptsBase: { format: 'A4'; printBackground: true; margin: { top: string; right: string; bottom: string; left: string }; displayHeaderFooter: true; footerTemplate: string },
+  headerTemplateNoDivider: string,
+  headerTemplateWithDivider: string
+): Promise<Buffer> {
+  const firstBuffer = await printPage.pdf({ ...pdfOptsBase, headerTemplate: headerTemplateNoDivider });
+  const firstDoc = await PDFDocument.load(firstBuffer);
+  const totalPages = firstDoc.getPageCount();
+  if (totalPages <= 1) return Buffer.from(firstBuffer);
+
+  const restBuffer = await printPage.pdf({ ...pdfOptsBase, headerTemplate: headerTemplateWithDivider, pageRanges: `2-${totalPages}` });
+  const restDoc = await PDFDocument.load(restBuffer);
+
+  const merged = await PDFDocument.create();
+  const [p1] = await merged.copyPages(firstDoc, [0]);
+  merged.addPage(p1);
+  const restPages = await merged.copyPages(restDoc, restDoc.getPageIndices());
+  restPages.forEach(p => merged.addPage(p));
+  return Buffer.from(await merged.save());
+}
+
 /**
  * Generate a single-section, lightweight micro-practice PDF for one student:
  * drives Puppeteer against the same levels_main.html the full worksheet
@@ -513,7 +550,7 @@ export async function generateMicroPracticePaper({
 :root{--ink:#1a1a1a;--paper:#ffffff;--accent:#2f6fed;--muted:#666;--line:#c9c9c9;--panel:#f4f6f9;--danger:#d33;--good:#1a8a4a;}
 *{box-sizing:border-box;}
 body{font-family:'Segoe UI',Arial,sans-serif;margin:0;background:#fff;color:var(--ink);}
-.page-wrapper{position:relative;background:var(--paper);width:794px;min-height:1123px;padding:34px 30px;}
+.page-wrapper{position:relative;background:var(--paper);width:794px;padding:34px 30px;}
 .page-header{display:flex;justify-content:space-between;align-items:baseline;border-bottom:2px solid var(--ink);padding-bottom:6px;margin-bottom:14px;}
 .page-header h1{font-size:18px;margin:0;}
 .page-header .sub{font-size:12px;color:var(--muted);}
@@ -531,31 +568,45 @@ body{font-family:'Segoe UI',Arial,sans-serif;margin:0;background:#fff;color:var(
 .match-grid{display:grid;grid-template-columns:1fr 90px 1fr;align-items:stretch;}
 .match-item{border:1px dashed var(--line);border-radius:6px;padding:8px;min-height:40px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
 .match-dot{width:12px;height:12px;border-radius:50%;border:2px solid var(--ink);background:#fff;flex-shrink:0;}
-.footer-stamp{position:absolute;bottom:10px;right:16px;font-family:'Courier New',monospace;font-size:9px;color:#888;}
 @media print{body{background:#fff;}.page-wrapper{box-shadow:none;margin:0;}}
-@page{margin:0;size:A4;}
     `;
 
     const wrappedHtml = `<!DOCTYPE html><html><head><style>${styleBlock}</style></head><body>
       <div class="page-wrapper">
-        <div style="position:relative;min-height:22mm;margin-bottom:4px;">
-          <img src="${qrDataUrl}" alt="Micro-practice QR" style="position:absolute;top:0;right:0;width:18mm;height:18mm;" />
-        </div>
         ${data.html}
-        <div class="footer-stamp">Micro-Practice · Student ID: ${studentId} · ${new Date().toLocaleDateString()}</div>
       </div>
     </body></html>`;
 
     await printPage.setContent(wrappedHtml, { waitUntil: 'networkidle0' as any, timeout: 15000 });
     await printPage.setViewport({ width: 794, height: 1123 });
 
-    const pdfBuffer = await printPage.pdf({
-      format: 'A4',
-      printBackground: true,
-      margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' },
-      displayHeaderFooter: false,
-      preferCSSPageSize: true
-    });
+    // QR + footer repeat via Puppeteer's native headerTemplate/footerTemplate
+    // (not in-body content) so they render correctly on every physical page —
+    // see renderPdfWithContinuationDivider for why the divider needs a
+    // separate header variant rather than a conditional inside one template.
+    const headerNoDivider = `<div style="width:100%;font-size:0;position:relative;">
+      <img src="${qrDataUrl}" style="position:absolute;top:1mm;right:8mm;width:26mm;height:26mm;" />
+    </div>`;
+    const headerWithDivider = `<div style="width:100%;font-size:0;position:relative;">
+      <img src="${qrDataUrl}" style="position:absolute;top:1mm;right:8mm;width:26mm;height:26mm;" />
+      <div style="position:absolute;bottom:2mm;left:8mm;right:8mm;border-bottom:1px solid #c9c9c9;"></div>
+    </div>`;
+    const footerTemplate = `<div style="width:100%;font-size:9px;font-family:'Courier New',monospace;color:#888;text-align:right;padding-right:8mm;">
+      Micro-Practice · Student ID: ${studentId} · ${new Date().toLocaleDateString()}
+    </div>`;
+
+    const pdfBuffer = await renderPdfWithContinuationDivider(
+      printPage,
+      {
+        format: 'A4',
+        printBackground: true,
+        margin: { top: '27mm', right: '0mm', bottom: '12mm', left: '0mm' },
+        displayHeaderFooter: true,
+        footerTemplate
+      },
+      headerNoDivider,
+      headerWithDivider
+    );
 
     await printPage.close();
 
@@ -608,22 +659,25 @@ export interface MultiCompetencyMicroPaperResult {
  * competencies for a single student, each as a labeled "Part N: <competency>"
  * section. Reuses generateMicroSet once per competency against the SAME
  * loaded levels_main.html page (one navigation, N evaluate calls) rather
- * than reloading per part. Sub-level and section index use the same
- * "start from the basics" defaults as the single-competency flow (0, 0).
+ * than reloading per part. levelId/subIdx per competency are resolved by the
+ * caller (index.ts's resolveCompetencyLevels, against each student's
+ * PracticeSchedule) rather than here — this function only renders the exact
+ * coordinates it's given, the same contract generateMicroPracticePaper
+ * already follows for a single competency.
  */
 export async function generateMultiCompetencyMicroPaper({
   studentId,
   studentName,
-  competencies,
+  competencyLevels,
   questionsPerCompetency
 }: {
   studentId: string;
   studentName: string;
-  competencies: string[];
+  competencyLevels: { competency: string; levelId: number; subIdx: number }[];
   questionsPerCompetency: number;
 }): Promise<MultiCompetencyMicroPaperResult> {
-  if (!Array.isArray(competencies) || competencies.length === 0) {
-    throw new Error('competencies must be a non-empty array.');
+  if (!Array.isArray(competencyLevels) || competencyLevels.length === 0) {
+    throw new Error('competencyLevels must be a non-empty array.');
   }
 
   const { launchBrowser } = await import('./browser');
@@ -648,13 +702,8 @@ export async function generateMultiCompetencyMicroPaper({
     const parts: MicroPracticePart[] = [];
     const partSectionsHtml: string[] = [];
 
-    for (let i = 0; i < competencies.length; i++) {
-      const competency = competencies[i];
-      const levelId = mapCompetencyToLevel(competency);
-      if (levelId == null) {
-        throw new Error(`No level found for competency "${competency}".`);
-      }
-      const subIdx = 0;
+    for (let i = 0; i < competencyLevels.length; i++) {
+      const { competency, levelId, subIdx } = competencyLevels[i];
       const sectionIndex = 0;
 
       const data = await page.evaluate(({ levelId, subIdx, sectionIndex, questionCount }) => {
@@ -747,7 +796,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;margin:0;background:#fff;color:var(
     const wrappedHtml = `<!DOCTYPE html><html><head><style>${styleBlock}</style></head><body>
       <div class="page-wrapper">
         <div class="page-header">
-          <div><h1>Micro-Practice — Multiple Competencies</h1><span class="sub">${competencies.join(', ')}</span></div>
+          <div><h1>Micro-Practice — Multiple Competencies</h1><span class="sub">${competencyLevels.map(c => c.competency).join(', ')}</span></div>
           <div style="text-align:right;font-size:12px;"><div><b>${studentName}</b></div><div>${studentId}</div></div>
         </div>
         ${partSectionsHtml.join('')}
@@ -757,27 +806,37 @@ body{font-family:'Segoe UI',Arial,sans-serif;margin:0;background:#fff;color:var(
     await printPage.setContent(wrappedHtml, { waitUntil: 'networkidle0' as any, timeout: 15000 });
     await printPage.setViewport({ width: 794, height: 1123 });
 
-    // top must clear the QR's own footprint (9mm offset + 18mm size = 27mm)
-    // on every page; bottom leaves room for the footer stamp.
-    const headerTemplate = `<div style="width:100%;font-size:0;position:relative;">
-      <img src="${qrDataUrl}" style="position:absolute;top:9mm;right:8mm;width:18mm;height:18mm;" />
+    // top must clear the QR's own footprint (1mm offset + 26mm size = 27mm)
+    // on every page; bottom leaves room for the footer stamp. Two header
+    // variants (with/without the continuation-page divider) are needed
+    // instead of one — see renderPdfWithContinuationDivider for why.
+    const headerNoDivider = `<div style="width:100%;font-size:0;position:relative;">
+      <img src="${qrDataUrl}" style="position:absolute;top:1mm;right:8mm;width:26mm;height:26mm;" />
+    </div>`;
+    const headerWithDivider = `<div style="width:100%;font-size:0;position:relative;">
+      <img src="${qrDataUrl}" style="position:absolute;top:1mm;right:8mm;width:26mm;height:26mm;" />
+      <div style="position:absolute;bottom:2mm;left:8mm;right:8mm;border-bottom:1px solid #c9c9c9;"></div>
     </div>`;
     const footerTemplate = `<div style="width:100%;font-size:9px;font-family:'Courier New',monospace;color:#888;text-align:right;padding-right:8mm;">
       Micro-Practice · Student ID: ${studentId} · ${new Date().toLocaleDateString()}
     </div>`;
 
-    const pdfBuffer = await printPage.pdf({
-      format: 'A4',
-      printBackground: true,
-      margin: { top: '27mm', right: '0mm', bottom: '12mm', left: '0mm' },
-      displayHeaderFooter: true,
-      headerTemplate,
-      footerTemplate
-    });
+    const pdfBuffer = await renderPdfWithContinuationDivider(
+      printPage,
+      {
+        format: 'A4',
+        printBackground: true,
+        margin: { top: '27mm', right: '0mm', bottom: '12mm', left: '0mm' },
+        displayHeaderFooter: true,
+        footerTemplate
+      },
+      headerNoDivider,
+      headerWithDivider
+    );
 
     await printPage.close();
 
-    const fileName = `micro_multi_${competencies.length}parts_student_${studentId}_${randomUUID()}.pdf`;
+    const fileName = `micro_multi_${competencyLevels.length}parts_student_${studentId}_${randomUUID()}.pdf`;
     const filePath = path.join(OUTPUT_DIR, fileName);
     fs.writeFileSync(filePath, pdfBuffer);
 

@@ -267,8 +267,16 @@ export interface PracticeSchedule {
   teacherId: string;
   competency: string;
   intervalDays: number;
-  currentSubLevel?: number; // 0, 1, or 2 — defaults to 0 for new schedules
-  resolved?: boolean;       // true once the student clears sub-level 2 with a good score
+  // The student's exact real-content position for this competency, in the
+  // 59-level micro-practice system (levels_main.html's LEVELS array — see
+  // flnLevels.ts). Optional because schedules written before this field
+  // existed won't have it; getOrInitPracticeSchedule (index.ts) backfills
+  // any schedule missing it back to the strand's easiest level, subIdx 0,
+  // rather than trust a currentSubLevel value that was never validated
+  // against a specific level.
+  currentLevelId?: number;
+  currentSubIdx?: number;  // subIdx within currentLevelId — defaults to 0 for new schedules; range depends on the level (see getSubsCountForLevel), no longer a fixed 0-2 cap
+  resolved?: boolean;      // true once the student clears the last subIdx of the last level in the competency's strand with a good score — no further real content exists
   nextDueDate: string;
   lastCompletedAt?: string;
   createdAt: string;
@@ -1133,24 +1141,43 @@ export class DBStore {
     return bp || undefined;
   }
 
+  // NOTE: these three methods previously called this.mongoDb! unconditionally
+  // (no file-based fallback), which throws when running without MONGODB_URI —
+  // the project's default local dev mode (npm run dev:backend). Fixed here to
+  // match the if(this.mongoDb){...}else{...} pattern used elsewhere in this
+  // file (e.g. getStudents), since the adaptive scheduling feature needs
+  // these to actually work locally.
   async getPracticeSchedules() {
-    return await this.mongoDb!.collection<PracticeSchedule>('practiceSchedules').find({}).toArray();
+    if (this.mongoDb) return await this.mongoDb.collection<PracticeSchedule>('practiceSchedules').find({}).toArray();
+    return this.data?.practiceSchedules || [];
   }
 
   async addPracticeSchedule(schedule: PracticeSchedule) {
-    await this.mongoDb!.collection('practiceSchedules').insertOne(schedule);
-    if (this.data) this.data.practiceSchedules.push(schedule);
+    if (this.mongoDb) await this.mongoDb.collection('practiceSchedules').insertOne(schedule);
+    if (this.data) {
+      if (!this.data.practiceSchedules) this.data.practiceSchedules = [];
+      this.data.practiceSchedules.push(schedule);
+      if (!this.mongoDb) await this.save();
+    }
     return schedule;
   }
 
   async updatePracticeSchedule(id: string, updates: Partial<PracticeSchedule>) {
-    await this.mongoDb!.collection('practiceSchedules').updateOne({ id }, { $set: updates });
-    const s = await this.mongoDb!.collection<PracticeSchedule>('practiceSchedules').findOne({ id });
-    if (s && this.data) {
-      const idx = this.data.practiceSchedules.findIndex(x => x.id === id);
-      if (idx !== -1) this.data.practiceSchedules[idx] = s;
+    if (this.mongoDb) {
+      await this.mongoDb.collection('practiceSchedules').updateOne({ id }, { $set: updates });
+      const s = await this.mongoDb.collection<PracticeSchedule>('practiceSchedules').findOne({ id });
+      if (s && this.data) {
+        const idx = this.data.practiceSchedules.findIndex(x => x.id === id);
+        if (idx !== -1) this.data.practiceSchedules[idx] = s;
+      }
+      return s || undefined;
     }
-    return s || undefined;
+    if (!this.data) return undefined;
+    const idx = this.data.practiceSchedules.findIndex(x => x.id === id);
+    if (idx === -1) return undefined;
+    this.data.practiceSchedules[idx] = { ...this.data.practiceSchedules[idx], ...updates };
+    await this.save();
+    return this.data.practiceSchedules[idx];
   }
 
   async getMicroAssignments() {

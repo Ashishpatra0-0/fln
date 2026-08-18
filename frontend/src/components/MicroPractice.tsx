@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { UserRole } from '../types';
 import { MicroPracticePaperUpload } from './MicroPracticePaperUpload';
 import { MicroPracticeAnswerEntry } from './MicroPracticeAnswerEntry';
-import { User, Users, FileCheck, Clock, ChevronDown } from 'lucide-react';
+import { User, Users, FileCheck, Clock, ChevronDown, TrendingUp } from 'lucide-react';
 
 interface Props {
     token: string;
@@ -330,14 +330,9 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
         setGeneratingPaper(true);
         setGeneratePaperError(null);
         try {
-            const levelRes = await apiFetch(`/api/practice/competency-to-level?competency=${encodeURIComponent(competency)}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            const levelData = await levelRes.json();
-            if (!levelRes.ok || levelData.levelId == null) {
-                setGeneratePaperError(levelData.error || 'Could not find a level for this competency.');
-                return;
-            }
+            // The server resolves levelId/subIdx from the student's PracticeSchedule
+            // for this competency (their real current position, advancing on good
+            // scores) — it's no longer looked up here and pinned to subIdx 0.
             const res = await apiFetch(`/api/students/${selectedStudentId}/micro-practice/generate-pdf`, {
                 method: 'POST',
                 headers: {
@@ -345,8 +340,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                     'Authorization': `Bearer ${token}`
                 },
                 body: JSON.stringify({
-                    levelId: levelData.levelId,
-                    subIdx: 0,
+                    competency,
                     sectionIndex: 0,
                     questionCount: paperQuestionCount
                 })
@@ -1270,9 +1264,12 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                 </div>
             </div>
             <div className="bg-white dark:bg-slate-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-sm p-5">
-                <h3 className="text-base font-bold text-slate-900 dark:text-white mb-4">
-                    Student Progress by Competency
-                </h3>
+                <div className="flex items-center gap-2 mb-4">
+                    <TrendingUp className="h-4 w-4 text-emerald-500" />
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                        Student Progress by Competency
+                    </h3>
+                </div>
 
                 {loadingProgress ? (
                     <p className="text-sm text-zinc-400">Loading...</p>
@@ -1569,7 +1566,7 @@ const StudentProgressChart: React.FC<StudentProgressChartProps> = ({ progressDat
             ) : n === 0 ? (
                 <p className="text-sm text-zinc-400">No practice history found for this student.</p>
             ) : (
-                <div className="relative">
+                <div className="relative max-w-[90%] mx-auto">
                     <svg
                         viewBox={`0 0 ${CHART_W} ${CHART_H}`}
                         className="w-full"
@@ -1620,7 +1617,7 @@ const StudentProgressChart: React.FC<StudentProgressChartProps> = ({ progressDat
                             <g>
                                 <line x1={cursorX} y1={TOP - 6} x2={cursorX} y2={BOTTOM + 6} stroke="currentColor" className="text-zinc-300 dark:text-zinc-600" strokeWidth="1.5" strokeDasharray="4 5" />
                                 {cursorDots.map((d, i) => (
-                                    <circle key={i} cx={d.x} cy={d.y} r="5" fill="white" className="dark:fill-slate-900" stroke={d.color} strokeWidth="3" />
+                                    <circle key={i} cx={d.x} cy={d.y} r="4" fill="white" className="dark:fill-slate-900" stroke={d.color} strokeWidth="2.5" />
                                 ))}
                             </g>
                         )}

@@ -16,7 +16,7 @@ import { dbStore, connectDB, UserRole, User, Student, School, Question, Workshee
 import { generateAIDiagnostic, evaluateAIDiagnostic, generateAIPersonalizedWorksheet, evaluateAIWorksheet } from './gemini';
 import { generateDiagnosticPaper } from './paperGenerator';
 import { generateQuestionsForLevel } from './levelGenerator';
-import { getStrandForLevel, mapCompetencyToLevel, KNOWN_COMPETENCIES } from './flnLevels';
+import { getStrandForLevel, mapCompetencyToLevel, KNOWN_COMPETENCIES, getSubsCountForLevel, getNextLevelInStrand } from './flnLevels';
 import * as levelsBackendClient from './levelsBackendClient';
 import { STATES_UTS } from './geoData';
 import { getAuthUser, canAccessStudent, sanitizeUser, JWT_SECRET, JWT_EXPIRES_IN, SEED_DEMO_PASSWORD_HASH } from './auth';
@@ -3632,22 +3632,6 @@ async function startServer() {
 
   // --- Adaptive Micro-Practice & Spaced-Repetition ---
 
-  // Resolves a weak-competency name to its easiest matching level in the
-  // 59-level micro-practice generation system (see flnLevels.ts). The
-  // frontend never needs to know about levelId numbering directly.
-  app.get('/api/practice/competency-to-level', async (req, res) => {
-    const user = getAuthUser(req);
-    if (!user) return res.status(401).json({ error: 'Unauthorized' });
-
-    const { competency } = req.query;
-    if (!competency || typeof competency !== 'string') {
-      return res.status(400).json({ error: 'competency query parameter is required.' });
-    }
-
-    const levelId = mapCompetencyToLevel(competency);
-    res.json({ levelId });
-  });
-
   // Shared logic for weak-competency lookup — used by both
   // GET /api/students/:id/weak-competencies (single-student UI lookup) and
   // POST /api/practice/bulk-generate (class-wide generation, below).
@@ -3722,12 +3706,41 @@ async function startServer() {
     if (!student) return res.status(404).json({ error: 'Student not found.' });
     if (!canAccessStudent(user, student)) return res.status(403).json({ error: 'Forbidden.' });
 
-    const { levelId, subIdx, sectionIndex, questionCount } = req.body;
-    if (levelId == null || subIdx == null || sectionIndex == null || questionCount == null) {
-      return res.status(400).json({ error: 'levelId, subIdx, sectionIndex, and questionCount are required.' });
+    const { competency, sectionIndex, questionCount, levelId: overrideLevelId, subIdx: overrideSubIdx } = req.body;
+    if (sectionIndex == null || questionCount == null) {
+      return res.status(400).json({ error: 'sectionIndex and questionCount are required.' });
     }
     if (!Number.isInteger(Number(questionCount)) || Number(questionCount) < 1) {
       return res.status(400).json({ error: 'questionCount must be a positive integer.' });
+    }
+
+    // Two ways to pick the level/subIdx to generate:
+    //  - competency (the normal, adaptive path): resolved from the student's
+    //    PracticeSchedule for that competency — their real current position,
+    //    not always the strand's easiest level. Blocked once resolved: true,
+    //    since there's no harder real content left to generate.
+    //  - explicit levelId+subIdx (manual override): a teacher deliberately
+    //    targeting a specific level, bypassing the schedule entirely — the
+    //    schedule is neither read nor advanced by this path.
+    let levelId: number, subIdx: number;
+    if (overrideLevelId != null && overrideSubIdx != null) {
+      levelId = Number(overrideLevelId);
+      subIdx = Number(overrideSubIdx);
+    } else {
+      if (!competency) {
+        return res.status(400).json({ error: 'competency is required (or supply levelId and subIdx directly to override the schedule).' });
+      }
+      let schedule: PracticeSchedule;
+      try {
+        schedule = await getOrInitPracticeSchedule(student.id, student.name, user.id, competency);
+      } catch (err: any) {
+        return res.status(400).json({ error: err.message });
+      }
+      if (schedule.resolved) {
+        return res.status(409).json({ error: `${competency} is fully mastered for this student — no further levels available.` });
+      }
+      levelId = schedule.currentLevelId!;
+      subIdx = schedule.currentSubIdx || 0;
     }
 
     try {
@@ -3735,8 +3748,8 @@ async function startServer() {
       const result = await generateMicroPracticePaper({
         studentId: student.id,
         studentName: student.name,
-        levelId: Number(levelId),
-        subIdx: Number(subIdx),
+        levelId,
+        subIdx,
         sectionIndex: Number(sectionIndex),
         questionCount: Number(questionCount)
       });
@@ -3749,9 +3762,9 @@ async function startServer() {
         id: result.paperId,
         studentId: student.id,
         studentName: student.name,
-        competency: getStrandForLevel(Number(levelId)),
-        levelId: Number(levelId),
-        subIdx: Number(subIdx),
+        competency: getStrandForLevel(levelId),
+        levelId,
+        subIdx,
         sectionIndex: Number(sectionIndex),
         questionCount: Number(questionCount),
         questions: result.questions,
@@ -3759,7 +3772,7 @@ async function startServer() {
         createdAt: new Date().toISOString()
       });
 
-      res.json({ success: true, pdfUrl: result.pdfUrl, paperId: result.paperId });
+      res.json({ success: true, pdfUrl: result.pdfUrl, paperId: result.paperId, levelId, subIdx });
     } catch (err: any) {
       console.error('Micro-practice PDF generation failed:', err);
       res.status(500).json({ success: false, error: err.message });
@@ -3788,11 +3801,20 @@ async function startServer() {
     }
 
     try {
+      const { resolved, masteredCompetencies } = await resolveCompetencyLevels(
+        student.id, student.name, user.id, competencies
+      );
+      if (resolved.length === 0) {
+        return res.status(409).json({
+          error: `All requested competencies (${masteredCompetencies.join(', ')}) are fully mastered for this student — no further levels available.`
+        });
+      }
+
       const { generateMultiCompetencyMicroPaper } = await import('./paperGenerator');
       const result = await generateMultiCompetencyMicroPaper({
         studentId: student.id,
         studentName: student.name,
-        competencies,
+        competencyLevels: resolved,
         questionsPerCompetency: Number(questionsPerCompetency)
       });
 
@@ -3805,7 +3827,12 @@ async function startServer() {
         parts: result.parts
       });
 
-      res.json({ success: true, pdfUrl: result.pdfUrl, paperId: result.paperId });
+      res.json({
+        success: true,
+        pdfUrl: result.pdfUrl,
+        paperId: result.paperId,
+        ...(masteredCompetencies.length ? { skippedMasteredCompetencies: masteredCompetencies } : {})
+      });
     } catch (err: any) {
       console.error('Multi-competency micro-practice PDF generation failed:', err);
       res.status(500).json({ success: false, error: err.message });
@@ -3900,11 +3927,23 @@ async function startServer() {
               competencies = weakData.weakCompetencies;
             }
 
+            const { resolved, masteredCompetencies } = await resolveCompetencyLevels(
+              student.id, student.name, user.id, competencies
+            );
+            if (resolved.length === 0) {
+              job.results.push({
+                studentId, studentName: student.name, skipped: true,
+                reason: `All weak competencies (${masteredCompetencies.join(', ')}) are fully mastered.`
+              });
+              job.completed++;
+              continue;
+            }
+
             const { generateMultiCompetencyMicroPaper } = await import('./paperGenerator');
             const result = await generateMultiCompetencyMicroPaper({
               studentId: student.id,
               studentName: student.name,
-              competencies,
+              competencyLevels: resolved,
               questionsPerCompetency: Number(questionsPerCompetency)
             });
 
@@ -4124,32 +4163,123 @@ async function startServer() {
     }
   });
 
-  // Three-tier scoring/scheduling: >=80% advances currentSubLevel (capped at 2 —
-  // clearing sub-level 2 at a good score resolves the competency instead of
-  // advancing further) and doubles the interval (max 30 days); 50-79% is a "hold"
-  // tier — no change to subLevel or interval; <50% halves the interval (min 1 day)
-  // without moving subLevel backward.
+  // Three-tier scoring/scheduling against REAL content position (levelId +
+  // subIdx in the 59-level micro-practice system), not an abstract counter:
+  // >=80% advances to the next subIdx within the current level; once that
+  // level's variations are exhausted, moves to the next-harder level in the
+  // same strand (getNextLevelInStrand) and resets to subIdx 0; if no next
+  // level exists either (the strand's hardest level, exhausted), the
+  // competency is resolved — no further real content to advance to. 50-79%
+  // is a "hold" tier — no change to levelId/subIdx or interval; <50% halves
+  // the interval (min 1 day) without moving position backward. In all
+  // cases the interval only ever grows on a good score (max 30 days) and
+  // only ever shrinks on a poor one — never on a hold.
   function calculateNextScheduleState(
     currentIntervalDays: number,
-    currentSubLevel: number,
+    currentLevelId: number,
+    currentSubIdx: number,
     correctCount: number,
     totalCount: number
-  ): { intervalDays: number; subLevel: number; resolved: boolean } {
+  ): { intervalDays: number; levelId: number; subIdx: number; resolved: boolean } {
     const scorePercent = totalCount > 0 ? (correctCount / totalCount) * 100 : 0;
 
     if (scorePercent >= 80) {
       const intervalDays = Math.min(30, currentIntervalDays * 2);
-      if (currentSubLevel >= 2) {
-        return { intervalDays, subLevel: currentSubLevel, resolved: true };
+      const subsInLevel = getSubsCountForLevel(currentLevelId) ?? 1;
+
+      if (currentSubIdx + 1 < subsInLevel) {
+        return { intervalDays, levelId: currentLevelId, subIdx: currentSubIdx + 1, resolved: false };
       }
-      return { intervalDays, subLevel: currentSubLevel + 1, resolved: false };
+      const nextLevelId = getNextLevelInStrand(currentLevelId);
+      if (nextLevelId != null) {
+        return { intervalDays, levelId: nextLevelId, subIdx: 0, resolved: false };
+      }
+      return { intervalDays, levelId: currentLevelId, subIdx: currentSubIdx, resolved: true };
     }
 
     if (scorePercent >= 50) {
-      return { intervalDays: currentIntervalDays, subLevel: currentSubLevel, resolved: false };
+      return { intervalDays: currentIntervalDays, levelId: currentLevelId, subIdx: currentSubIdx, resolved: false };
     }
 
-    return { intervalDays: Math.max(1, Math.floor(currentIntervalDays / 2)), subLevel: currentSubLevel, resolved: false };
+    return { intervalDays: Math.max(1, Math.floor(currentIntervalDays / 2)), levelId: currentLevelId, subIdx: currentSubIdx, resolved: false };
+  }
+
+  // Single creation point for a competency's PracticeSchedule — used both at
+  // generation time (new §3 resolver, so generation can read a real position)
+  // and at submit time (below, unchanged trigger point for legacy/paperless
+  // submissions). Guarantees exactly one code path decides what a brand-new
+  // or legacy (pre-currentLevelId) schedule's starting position is: the
+  // competency's easiest level, subIdx 0 — same default as before this
+  // change, just now persisted as a real levelId instead of implied.
+  //
+  // A schedule missing currentLevelId (written before this field existed, or
+  // any competency string that no longer maps to a strand) is treated as
+  // needing backfill: currentSubIdx is reset to 0 rather than trusting an old
+  // 0/1/2 value that was never validated against a specific level.
+  async function getOrInitPracticeSchedule(
+    studentId: string,
+    studentName: string,
+    teacherId: string,
+    competency: string
+  ): Promise<PracticeSchedule> {
+    const schedules = await dbStore.getPracticeSchedules();
+    const existing = schedules.find(s => s.studentId === studentId && s.competency === competency);
+
+    if (existing && existing.currentLevelId != null) {
+      return existing;
+    }
+
+    const easiestLevelId = mapCompetencyToLevel(competency);
+    if (easiestLevelId == null) {
+      throw new Error(`No level found for competency "${competency}".`);
+    }
+
+    if (existing) {
+      // Legacy schedule (predates currentLevelId) — backfill in place.
+      const updated = await dbStore.updatePracticeSchedule(existing.id, {
+        currentLevelId: easiestLevelId,
+        currentSubIdx: 0
+      });
+      return updated || { ...existing, currentLevelId: easiestLevelId, currentSubIdx: 0 };
+    }
+
+    const created: PracticeSchedule = {
+      id: 'sched_' + randomUUID().slice(0, 8),
+      studentId,
+      studentName,
+      teacherId,
+      competency,
+      intervalDays: 1,
+      currentLevelId: easiestLevelId,
+      currentSubIdx: 0,
+      resolved: false,
+      nextDueDate: new Date().toISOString(),
+      createdAt: new Date().toISOString()
+    };
+    await dbStore.addPracticeSchedule(created);
+    return created;
+  }
+
+  // Resolves each competency in a list to the student's real current
+  // levelId/subIdx (creating/backfilling each schedule as needed via
+  // getOrInitPracticeSchedule), splitting out any that are already resolved
+  // (fully mastered — no further real content to generate a paper for).
+  // Shared by the multi-competency single-paper route and the bulk-generate
+  // job below, since both build a "Part N: <competency>" paper the same way.
+  async function resolveCompetencyLevels(
+    studentId: string, studentName: string, teacherId: string, competencies: string[]
+  ): Promise<{ resolved: { competency: string; levelId: number; subIdx: number }[]; masteredCompetencies: string[] }> {
+    const resolved: { competency: string; levelId: number; subIdx: number }[] = [];
+    const masteredCompetencies: string[] = [];
+    for (const competency of competencies) {
+      const schedule = await getOrInitPracticeSchedule(studentId, studentName, teacherId, competency);
+      if (schedule.resolved) {
+        masteredCompetencies.push(competency);
+        continue;
+      }
+      resolved.push({ competency, levelId: schedule.currentLevelId!, subIdx: schedule.currentSubIdx || 0 });
+    }
+    return { resolved, masteredCompetencies };
   }
 
   // IST has no DST, so a fixed +5:30 offset is exact — no timezone library
@@ -4264,26 +4394,15 @@ async function startServer() {
     const student = students.find(s => s.id === studentId);
     if (!student) return res.status(404).json({ error: 'Student not found.' });
 
-    // Find or create the schedule now, at actual submission time.
-    const schedules = await dbStore.getPracticeSchedules();
-    let schedule: PracticeSchedule | undefined = schedules.find(
-      s => s.studentId === studentId && s.competency === competency
-    );
-
-    if (!schedule) {
-      schedule = {
-        id: 'sched_' + randomUUID().slice(0, 8),
-        studentId,
-        studentName: student.name,
-        teacherId: user.id,
-        competency,
-        intervalDays: 1,
-        currentSubLevel: 0,
-        resolved: false,
-        nextDueDate: new Date().toISOString(),
-        createdAt: new Date().toISOString()
-      };
-      await dbStore.addPracticeSchedule(schedule);
+    // Find or create the schedule now, at actual submission time (a no-op
+    // find in the normal flow, since generation already creates/backfills it
+    // via the same helper — kept here too for paperless/legacy submissions
+    // that never went through a generate call).
+    let schedule: PracticeSchedule;
+    try {
+      schedule = await getOrInitPracticeSchedule(studentId, student.name, user.id, competency);
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message });
     }
 
     // Grade the submitted answers against the questions passed back to us.
@@ -4314,18 +4433,22 @@ async function startServer() {
     };
     await dbStore.addMicroAssignment(assignment);
 
-    // Update the schedule's sub-level, resolved flag, and next due date together
-    // using the three-tier scoring logic.
+    // Update the schedule's real-content position (levelId/subIdx), resolved
+    // flag, and next due date together using the three-tier scoring logic.
+    // schedule.currentLevelId is guaranteed set here — getOrInitPracticeSchedule
+    // above never returns a schedule without one.
     const nextState = calculateNextScheduleState(
       schedule.intervalDays,
-      schedule.currentSubLevel || 0,
+      schedule.currentLevelId!,
+      schedule.currentSubIdx || 0,
       correctCount,
       questions.length
     );
     const nextDue = nextDueDateIST(new Date(), nextState.intervalDays);
     await dbStore.updatePracticeSchedule(schedule.id, {
       intervalDays: nextState.intervalDays,
-      currentSubLevel: nextState.subLevel,
+      currentLevelId: nextState.levelId,
+      currentSubIdx: nextState.subIdx,
       resolved: nextState.resolved,
       nextDueDate: nextDue.toISOString(),
       lastCompletedAt: now
