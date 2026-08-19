@@ -3748,6 +3748,7 @@ async function startServer() {
       const result = await generateMicroPracticePaper({
         studentId: student.id,
         studentName: student.name,
+        studentClass: `${student.classGroup} - ${student.section}`,
         levelId,
         subIdx,
         sectionIndex: Number(sectionIndex),
@@ -3814,6 +3815,7 @@ async function startServer() {
       const result = await generateMultiCompetencyMicroPaper({
         studentId: student.id,
         studentName: student.name,
+        studentClass: `${student.classGroup} - ${student.section}`,
         competencyLevels: resolved,
         questionsPerCompetency: Number(questionsPerCompetency)
       });
@@ -3943,6 +3945,7 @@ async function startServer() {
             const result = await generateMultiCompetencyMicroPaper({
               studentId: student.id,
               studentName: student.name,
+              studentClass: `${student.classGroup} - ${student.section}`,
               competencyLevels: resolved,
               questionsPerCompetency: Number(questionsPerCompetency)
             });

@@ -503,6 +503,7 @@ async function renderPdfWithContinuationDivider(
 export async function generateMicroPracticePaper({
   studentId,
   studentName,
+  studentClass,
   levelId,
   subIdx,
   sectionIndex,
@@ -510,6 +511,7 @@ export async function generateMicroPracticePaper({
 }: {
   studentId: string;
   studentName: string;
+  studentClass: string;
   levelId: number;
   subIdx: number;
   sectionIndex: number;
@@ -526,15 +528,17 @@ export async function generateMicroPracticePaper({
     const htmlPath = path.join(worksheetAssetsDir, "levels_main.html");
     await page.goto(`file://${htmlPath}`, { waitUntil: 'networkidle0' as any, timeout: 30000 });
 
-    const data = await page.evaluate(({ levelId, subIdx, sectionIndex, questionCount, studentId, studentName }) => {
+    const data = await page.evaluate(({ levelId, subIdx, sectionIndex, questionCount, studentId, studentName, studentClass }) => {
       const doc = (globalThis as any).document;
       const nameInput = doc.getElementById('studentName');
       const idInput = doc.getElementById('studentId');
+      const classInput = doc.getElementById('studentClass');
       if (nameInput) nameInput.value = studentName;
       if (idInput) idInput.value = studentId;
+      if (classInput) classInput.value = studentClass;
       // @ts-ignore — generateMicroSet is a global defined in levels_main.html
       return generateMicroSet(levelId, subIdx, sectionIndex, questionCount);
-    }, { levelId, subIdx, sectionIndex, questionCount, studentId, studentName });
+    }, { levelId, subIdx, sectionIndex, questionCount, studentId, studentName, studentClass });
 
     await page.close();
 
@@ -668,11 +672,13 @@ export interface MultiCompetencyMicroPaperResult {
 export async function generateMultiCompetencyMicroPaper({
   studentId,
   studentName,
+  studentClass,
   competencyLevels,
   questionsPerCompetency
 }: {
   studentId: string;
   studentName: string;
+  studentClass: string;
   competencyLevels: { competency: string; levelId: number; subIdx: number }[];
   questionsPerCompetency: number;
 }): Promise<MultiCompetencyMicroPaperResult> {
@@ -691,13 +697,15 @@ export async function generateMultiCompetencyMicroPaper({
     const htmlPath = path.join(worksheetAssetsDir, "levels_main.html");
     await page.goto(`file://${htmlPath}`, { waitUntil: 'networkidle0' as any, timeout: 30000 });
 
-    await page.evaluate(({ studentId, studentName }) => {
+    await page.evaluate(({ studentId, studentName, studentClass }) => {
       const doc = (globalThis as any).document;
       const nameInput = doc.getElementById('studentName');
       const idInput = doc.getElementById('studentId');
+      const classInput = doc.getElementById('studentClass');
       if (nameInput) nameInput.value = studentName;
       if (idInput) idInput.value = studentId;
-    }, { studentId, studentName });
+      if (classInput) classInput.value = studentClass;
+    }, { studentId, studentName, studentClass });
 
     const parts: MicroPracticePart[] = [];
     const partSectionsHtml: string[] = [];
@@ -737,7 +745,7 @@ export async function generateMultiCompetencyMicroPaper({
 
       parts.push({ competency, levelId, subIdx, sectionIndex, questionCount: questionsPerCompetency, questions });
       partSectionsHtml.push(`
-        <div style="font-size:16px;font-weight:800;margin:18px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--ink);">Part ${i + 1}: ${competency} · ${data.meta.title} · Level ${data.meta.sublevelId}</div>
+        <div style="font-size:16px;font-weight:800;margin:18px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--ink);">Part ${i + 1}: ${competency} · ${data.meta.title}</div>
         ${data.html}
       `);
     }
@@ -797,7 +805,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;margin:0;background:#fff;color:var(
       <div class="page-wrapper">
         <div class="page-header">
           <div><h1>Micro-Practice — Multiple Competencies</h1><span class="sub">${competencyLevels.map(c => c.competency).join(', ')}</span></div>
-          <div style="text-align:right;font-size:12px;"><div><b>${studentName}</b></div><div>${studentId}</div></div>
+          <div style="text-align:right;font-size:12px;"><div><b>${studentName}</b></div><div>${studentId}</div>${studentClass ? `<div>${studentClass}</div>` : ''}</div>
         </div>
         ${partSectionsHtml.join('')}
       </div>
