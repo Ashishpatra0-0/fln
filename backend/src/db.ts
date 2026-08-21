@@ -1211,6 +1211,13 @@ export class DBStore {
     return p || undefined;
   }
 
+  // Batched version of getMicroPracticePaperById — used by the Due Today
+  // filter (see GET /api/practice/due) to resolve every pending uploaded
+  // paper's covered competencies in one round trip instead of N.
+  async getMicroPracticePapersByIds(ids: string[]) {
+    return await this.mongoDb!.collection<MicroPracticePaper>('microPracticePapers').find({ id: { $in: ids } }).toArray();
+  }
+
   async getUploadedPapers() {
     return await this.mongoDb!.collection<UploadedPaper>('uploadedPapers').find({}).toArray();
   }
@@ -1221,9 +1228,34 @@ export class DBStore {
     return paper;
   }
 
-  async getUploadedPaperByPaperId(paperId: string) {
-    const p = await this.mongoDb!.collection<UploadedPaper>('uploadedPapers').findOne({ paperId });
+  async getUploadedPaperById(id: string) {
+    const p = await this.mongoDb!.collection<UploadedPaper>('uploadedPapers').findOne({ id });
     return p || undefined;
+  }
+
+  // Sorted by uploadedAt desc so that if duplicate records for the same
+  // paperId ever exist (e.g. legacy rows written before duplicate-upload
+  // handling existed), this deterministically returns the most recent one
+  // instead of an arbitrary Mongo-natural-order match.
+  async getUploadedPaperByPaperId(paperId: string) {
+    const p = await this.mongoDb!.collection<UploadedPaper>('uploadedPapers').findOne({ paperId }, { sort: { uploadedAt: -1 } });
+    return p || undefined;
+  }
+
+  // Batched version of getUploadedPaperByPaperId for the duplicate-upload
+  // pre-flight check — one round trip for N paperIds instead of N. Returns
+  // at most one record per paperId (the most recent), same tie-break as
+  // above.
+  async getUploadedPapersByPaperIds(paperIds: string[]) {
+    const all = await this.mongoDb!.collection<UploadedPaper>('uploadedPapers')
+      .find({ paperId: { $in: paperIds } })
+      .sort({ uploadedAt: -1 })
+      .toArray();
+    const byPaperId = new Map<string, UploadedPaper>();
+    for (const p of all) {
+      if (!byPaperId.has(p.paperId)) byPaperId.set(p.paperId, p);
+    }
+    return Array.from(byPaperId.values());
   }
 
   async updateUploadedPaper(id: string, updates: Partial<UploadedPaper>) {

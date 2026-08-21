@@ -22,9 +22,22 @@ interface PageCandidate {
     payload: DecodedPayload; // identical across all merged pages (same paperId)
     pageImageDataUrls: string[]; // one entry per physical page, in order
     filename: string;
-    status: 'pending' | 'uploading' | 'uploaded' | 'error';
+    // 'skipped-graded': a duplicate of an already-graded paper — never
+    // uploaded, no replace option. 'skipped-duplicate': a duplicate of a
+    // still-pending paper the teacher chose NOT to replace.
+    status: 'pending' | 'uploading' | 'uploaded' | 'error' | 'skipped-graded' | 'skipped-duplicate';
     uploadError?: string;
+    skipReason?: string;
     result?: UploadResult;
+}
+
+// One entry per paperId that already has an UploadedPaper record, from
+// POST /api/practice/upload-paper/check-duplicates.
+interface DuplicateInfo {
+    paperId: string;
+    studentName: string;
+    status: 'pending' | 'graded';
+    uploadedPaperId: string;
 }
 
 interface DecodedPage {
@@ -184,6 +197,26 @@ export const MicroPracticePaperUpload: React.FC<Props> = ({ token, onPaperIdenti
     const [fileBatches, setFileBatches] = useState<FileBatch[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
+    // Blocks handleConfirmUploadAll mid-flight until the teacher answers the
+    // replace-duplicates dialog. Set while still in stage 'reviewing' —
+    // rendered as a full takeover of the panel body (see below) rather than
+    // a separate overlay, so no z-index/portal machinery is needed.
+    const [confirmReplace, setConfirmReplace] = useState<{ names: string[] } | null>(null);
+    const confirmReplaceResolver = useRef<((accepted: boolean) => void) | null>(null);
+
+    function askConfirmReplace(names: string[]): Promise<boolean> {
+        return new Promise(resolve => {
+            confirmReplaceResolver.current = resolve;
+            setConfirmReplace({ names });
+        });
+    }
+
+    function resolveConfirmReplace(accepted: boolean) {
+        setConfirmReplace(null);
+        confirmReplaceResolver.current?.(accepted);
+        confirmReplaceResolver.current = null;
+    }
+
     // Appends a new batch for the selected file rather than replacing
     // anything — repeated selections (via "Upload More Files") just keep
     // accumulating batches until the teacher confirms.
@@ -231,7 +264,89 @@ export const MicroPracticePaperUpload: React.FC<Props> = ({ token, onPaperIdenti
     // Preserves the original single-paper fast path exactly: if there's
     // only one candidate total and it uploads successfully, hand off
     // immediately with no extra summary screen.
+    //
+    // Before any image is actually uploaded, checks every decoded paperId
+    // against existing UploadedPaper records (see check-duplicates on the
+    // backend): a duplicate of an already-graded paper is skipped with an
+    // inline message; a duplicate of a still-pending paper pauses here for
+    // a yes/no from the teacher (askConfirmReplace) before continuing.
     const handleConfirmUploadAll = async () => {
+        const flatWork = fileBatches.flatMap(b =>
+            b.candidates.map((c, candidateIndex) => ({ batchId: b.id, candidateIndex, candidate: c }))
+        );
+
+        let duplicates: DuplicateInfo[] = [];
+        try {
+            const paperIds = Array.from(new Set(flatWork.map(w => w.candidate.payload.paperId)));
+            const res = await apiFetch('/api/practice/upload-paper/check-duplicates', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ paperIds })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                duplicates = data.duplicates || [];
+            }
+            // A non-ok response here just leaves `duplicates` empty — every
+            // candidate proceeds as a fresh upload, same as before this
+            // feature existed, rather than blocking on a check failure.
+        } catch {
+            // Network error checking duplicates — same fail-open reasoning.
+        }
+        const dupByPaperId = new Map(duplicates.map(d => [d.paperId, d]));
+
+        const gradedDupKeys = new Set<string>();
+        const pendingDupWork: typeof flatWork = [];
+        let proceedWork: (typeof flatWork[number] & { replaceUploadedPaperId?: string })[] = [];
+
+        for (const work of flatWork) {
+            const dup = dupByPaperId.get(work.candidate.payload.paperId);
+            if (!dup) {
+                proceedWork.push(work);
+            } else if (dup.status === 'graded') {
+                gradedDupKeys.add(`${work.batchId}:${work.candidateIndex}`);
+            } else {
+                pendingDupWork.push(work);
+            }
+        }
+
+        if (gradedDupKeys.size > 0) {
+            setFileBatches(prev => prev.map(b => ({
+                ...b,
+                candidates: b.candidates.map((c, idx) => gradedDupKeys.has(`${b.id}:${idx}`)
+                    ? { ...c, status: 'skipped-graded' as const, skipReason: 'This paper has already been graded.' }
+                    : c)
+            })));
+        }
+
+        if (pendingDupWork.length > 0) {
+            const names = pendingDupWork.map(w => w.candidate.payload.studentName);
+            const accepted = await askConfirmReplace(names);
+            if (accepted) {
+                for (const w of pendingDupWork) {
+                    const dup = dupByPaperId.get(w.candidate.payload.paperId)!;
+                    proceedWork.push({ ...w, replaceUploadedPaperId: dup.uploadedPaperId });
+                }
+            } else {
+                const declinedKeys = new Set(pendingDupWork.map(w => `${w.batchId}:${w.candidateIndex}`));
+                setFileBatches(prev => prev.map(b => ({
+                    ...b,
+                    candidates: b.candidates.map((c, idx) => declinedKeys.has(`${b.id}:${idx}`)
+                        ? { ...c, status: 'skipped-duplicate' as const, skipReason: "Skipped — you chose not to replace the previous upload." }
+                        : c)
+                })));
+            }
+        }
+
+        // Nothing left to upload — every candidate was either already graded
+        // (silent skip) or a duplicate the teacher chose not to replace.
+        // There's nothing to review, so close the whole panel instead of
+        // landing on a 'done' screen that only has a Close button on it.
+        if (proceedWork.length === 0) {
+            onCancel();
+            return;
+        }
+
         setStage('uploading');
 
         // Shared across every candidate uploaded in this one confirm action, so
@@ -239,14 +354,10 @@ export const MicroPracticePaperUpload: React.FC<Props> = ({ token, onPaperIdenti
         // batch (see MicroPractice.tsx) instead of by upload timestamp, which
         // drifts too much under real network latency to match reliably.
         const uploadBatchId = `batch_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-
-        const flatWork = fileBatches.flatMap(b =>
-            b.candidates.map((c, candidateIndex) => ({ batchId: b.id, candidateIndex, candidate: c }))
-        );
         const finalResults: PageCandidate[] = [];
 
-        for (const work of flatWork) {
-            const { batchId, candidateIndex, candidate: c } = work;
+        for (const work of proceedWork) {
+            const { batchId, candidateIndex, candidate: c, replaceUploadedPaperId } = work;
             setFileBatches(prev => prev.map(b => b.id !== batchId ? b : {
                 ...b,
                 candidates: b.candidates.map((x, idx) => idx === candidateIndex ? { ...x, status: 'uploading' } : x)
@@ -260,7 +371,10 @@ export const MicroPracticePaperUpload: React.FC<Props> = ({ token, onPaperIdenti
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${token}`
                     },
-                    body: JSON.stringify({ imageBase64s: c.pageImageDataUrls, filename: c.filename, uploadBatchId, ...c.payload })
+                    body: JSON.stringify({
+                        imageBase64s: c.pageImageDataUrls, filename: c.filename, uploadBatchId, ...c.payload,
+                        ...(replaceUploadedPaperId ? { replaceUploadedPaperId } : {})
+                    })
                 });
                 const data = await res.json();
                 if (!res.ok) {
@@ -314,6 +428,29 @@ export const MicroPracticePaperUpload: React.FC<Props> = ({ token, onPaperIdenti
                 className="hidden"
             />
 
+            {confirmReplace && (
+                <div className="space-y-4 text-center">
+                    <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-1">
+                        <p>You've already uploaded papers for: <b>{confirmReplace.names.join(', ')}</b>.</p>
+                        <p>Do you want to replace their previously uploaded papers with these new ones?</p>
+                    </div>
+                    <div className="flex gap-3 justify-center">
+                        <button
+                            onClick={() => resolveConfirmReplace(false)}
+                            className="px-5 py-2 text-xs font-medium bg-zinc-100 text-zinc-700 rounded-lg hover:bg-zinc-200"
+                        >
+                            No, Skip Them
+                        </button>
+                        <button
+                            onClick={() => resolveConfirmReplace(true)}
+                            className="px-5 py-2 text-xs font-medium bg-amber-600 text-white rounded-lg hover:bg-amber-700"
+                        >
+                            Yes, Replace
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {stage === 'idle' && (
                 <div className="space-y-3">
                     <label className="block text-xs font-mono font-bold text-zinc-500 dark:text-zinc-400 uppercase">
@@ -332,7 +469,7 @@ export const MicroPracticePaperUpload: React.FC<Props> = ({ token, onPaperIdenti
                 </div>
             )}
 
-            {stage === 'reviewing' && (
+            {stage === 'reviewing' && !confirmReplace && (
                 <div className="space-y-4">
                     <div className="space-y-3">
                         {fileBatches.map(batch => (
@@ -359,13 +496,20 @@ export const MicroPracticePaperUpload: React.FC<Props> = ({ token, onPaperIdenti
                                             <p className="text-xs text-zinc-500">
                                                 Found <b>{batch.candidates.length}</b> paper{batch.candidates.length !== 1 ? 's' : ''}
                                             </p>
-                                            {batch.candidates.map(c => (
-                                                <div key={c.pageIndices.join('-')} className="flex items-center gap-2 text-sm p-2 border border-emerald-200 bg-emerald-50 rounded-lg">
-                                                    <span className="text-emerald-600">✓</span>
-                                                    <span className="text-zinc-400 text-xs font-mono">{formatPageLabel(c.pageIndices)}</span>
-                                                    <span className="font-medium text-zinc-800">{c.payload.studentName}</span>
-                                                </div>
-                                            ))}
+                                            {batch.candidates.map(c => {
+                                                const isSkipped = c.status === 'skipped-graded' || c.status === 'skipped-duplicate';
+                                                return (
+                                                    <div
+                                                        key={c.pageIndices.join('-')}
+                                                        className={`flex items-center gap-2 text-sm p-2 border rounded-lg ${isSkipped ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}
+                                                    >
+                                                        <span className={isSkipped ? 'text-amber-600' : 'text-emerald-600'}>{isSkipped ? '⏭' : '✓'}</span>
+                                                        <span className="text-zinc-400 text-xs font-mono">{formatPageLabel(c.pageIndices)}</span>
+                                                        <span className="font-medium text-zinc-800">{c.payload.studentName}</span>
+                                                        {isSkipped && <span className="text-xs text-amber-700">— {c.skipReason}</span>}
+                                                    </div>
+                                                );
+                                            })}
                                             {batch.skippedPages.map(p => (
                                                 <p key={`skip-${p}`} className="text-xs text-zinc-400 px-2">
                                                     Page {p}: no readable QR code — skipped
@@ -409,11 +553,13 @@ export const MicroPracticePaperUpload: React.FC<Props> = ({ token, onPaperIdenti
                                     <span className={
                                         c.status === 'uploaded' ? 'text-emerald-600 font-bold' :
                                         c.status === 'error' ? 'text-red-600 font-bold' :
-                                        c.status === 'uploading' ? 'text-blue-600' : 'text-zinc-400'
+                                        c.status === 'uploading' ? 'text-blue-600' :
+                                        (c.status === 'skipped-graded' || c.status === 'skipped-duplicate') ? 'text-amber-600 font-bold' : 'text-zinc-400'
                                     }>
                                         {c.status === 'uploaded' ? '✓ Uploaded' :
                                          c.status === 'error' ? '✗ Failed' :
-                                         c.status === 'uploading' ? 'Uploading…' : 'Waiting…'}
+                                         c.status === 'uploading' ? 'Uploading…' :
+                                         (c.status === 'skipped-graded' || c.status === 'skipped-duplicate') ? '⏭ Skipped' : 'Waiting…'}
                                     </span>
                                 </div>
                             ))}
@@ -422,25 +568,36 @@ export const MicroPracticePaperUpload: React.FC<Props> = ({ token, onPaperIdenti
                 </div>
             )}
 
-            {stage === 'done' && (
+            {stage === 'done' && (() => {
+                const skippedCount = allCandidates.filter(c => c.status === 'skipped-graded' || c.status === 'skipped-duplicate').length;
+                return (
                 <div className="space-y-4">
                     <p className="text-sm text-zinc-700 dark:text-zinc-200">
                         {successResults.length} of {allCandidates.length} paper{allCandidates.length !== 1 ? 's' : ''} uploaded successfully.
+                        {skippedCount > 0 && ` ${skippedCount} skipped.`}
                     </p>
                     <div className="space-y-1.5">
-                        {allCandidates.map((c, idx) => (
-                            <div
-                                key={idx}
-                                className={`flex items-center justify-between text-sm p-2.5 rounded-lg border ${c.status === 'uploaded' ? 'border-emerald-200 bg-emerald-50' : 'border-red-200 bg-red-50'}`}
-                            >
-                                <span className="font-medium text-zinc-800">{formatPageLabel(c.pageIndices)} — {c.payload.studentName}</span>
-                                {c.status === 'uploaded' ? (
-                                    <span className="text-emerald-600 text-xs font-bold">✓ Uploaded</span>
-                                ) : (
-                                    <span className="text-red-600 text-xs" title={c.uploadError}>✗ {c.uploadError || 'Failed'}</span>
-                                )}
-                            </div>
-                        ))}
+                        {allCandidates.map((c, idx) => {
+                            const isSkipped = c.status === 'skipped-graded' || c.status === 'skipped-duplicate';
+                            return (
+                                <div
+                                    key={idx}
+                                    className={`flex items-center justify-between text-sm p-2.5 rounded-lg border ${
+                                        c.status === 'uploaded' ? 'border-emerald-200 bg-emerald-50' :
+                                        isSkipped ? 'border-amber-200 bg-amber-50' : 'border-red-200 bg-red-50'
+                                    }`}
+                                >
+                                    <span className="font-medium text-zinc-800">{formatPageLabel(c.pageIndices)} — {c.payload.studentName}</span>
+                                    {c.status === 'uploaded' ? (
+                                        <span className="text-emerald-600 text-xs font-bold">✓ Uploaded</span>
+                                    ) : isSkipped ? (
+                                        <span className="text-amber-700 text-xs" title={c.skipReason}>⏭ Skipped — {c.skipReason}</span>
+                                    ) : (
+                                        <span className="text-red-600 text-xs" title={c.uploadError}>✗ {c.uploadError || 'Failed'}</span>
+                                    )}
+                                </div>
+                            );
+                        })}
                     </div>
                     <div className="flex gap-3">
                         {successResults.length > 0 && (
@@ -461,7 +618,8 @@ export const MicroPracticePaperUpload: React.FC<Props> = ({ token, onPaperIdenti
                         </button>
                     </div>
                 </div>
-            )}
+                );
+            })()}
         </div>
     );
 };

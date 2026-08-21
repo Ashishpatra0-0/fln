@@ -992,11 +992,13 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                         </div>
                     )}
 
-                    {bulkJob?.status === 'completed' && (
+                    {bulkJob?.status === 'completed' && (() => {
+                        const successCount = bulkJob.results.filter((r: any) => !r.skipped).length;
+                        return (
                         <div className="space-y-4">
                             <div className="flex items-center justify-between">
                                 <span className="text-green-700 dark:text-green-300 font-bold text-sm">
-                                    ✅ {bulkJob.total} Micro-Practice Papers Generated Successfully
+                                    ✅ {successCount} Micro-Practice Paper{successCount !== 1 ? 's' : ''} Generated Successfully
                                 </span>
                                 <button onClick={closeGeneratePanel} className="text-xs font-bold text-indigo-600 hover:underline">
                                     Done
@@ -1011,7 +1013,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                             rel="noreferrer"
                                             className="inline-flex items-center gap-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-mono font-bold px-4 py-2.5 rounded-lg transition-colors cursor-pointer shadow-sm"
                                         >
-                                            🖨️ Print / Open PDF ({bulkJob.total} Papers)
+                                            🖨️ Print / Open PDF ({successCount} Paper{successCount !== 1 ? 's' : ''})
                                         </a>
                                     )}
                                     {bulkJob.zipUrl && (
@@ -1063,7 +1065,8 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                 </table>
                             </div>
                         </div>
-                    )}
+                        );
+                    })()}
 
                     {bulkJob?.status === 'failed' && (
                         <div className="p-3 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg">

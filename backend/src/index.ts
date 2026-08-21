@@ -4071,6 +4071,42 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  // Pre-flight check for the paper-upload batch UI: given the paperIds
+  // decoded client-side from a set of QR codes (before any image is
+  // actually uploaded), reports which ones already have an UploadedPaper
+  // record — and whether that record is still 'pending' (offer to replace)
+  // or already 'graded' (nothing to do but skip). Scoped with the same
+  // canAccessStudent check as the upload route itself, so this can't be
+  // used to probe grading status of students outside the caller's roster.
+  app.post('/api/practice/upload-paper/check-duplicates', async (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { paperIds } = req.body;
+    if (!Array.isArray(paperIds) || paperIds.length === 0) {
+      return res.status(400).json({ error: 'paperIds must be a non-empty array.' });
+    }
+
+    const [existing, students] = await Promise.all([
+      dbStore.getUploadedPapersByPaperIds(paperIds),
+      dbStore.getStudents()
+    ]);
+
+    const duplicates = existing
+      .filter(p => {
+        const student = students.find(s => s.id === p.studentId);
+        return !!student && canAccessStudent(user, student);
+      })
+      .map(p => ({
+        paperId: p.paperId,
+        studentName: p.studentName,
+        status: p.gradingStatus,
+        uploadedPaperId: p.id
+      }));
+
+    res.json({ duplicates });
+  });
+
   // Stores an uploaded photo of a completed micro-practice paper. No image
   // processing/QR-decoding happens here — the frontend already decoded the
   // paper's QR code before calling this; these fields are just echoed back
@@ -4080,11 +4116,16 @@ async function startServer() {
   // so an uploaded-but-ungraded paper can be found later via
   // GET /api/practice/pending-papers instead of only living in-memory for
   // the current browser session.
+  //
+  // An optional replaceUploadedPaperId (from the check-duplicates flow above)
+  // means the teacher confirmed replacing a still-pending duplicate: the
+  // existing record is updated in place (new image, same id/uploadedAt/
+  // uploadBatchId) instead of inserting a second row for the same paperId.
   app.post('/api/practice/upload-paper', async (req, res) => {
     const user = getAuthUser(req);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { imageBase64, imageBase64s, filename, paperId, studentId, studentName, levelId, subIdx, sectionIndex, questionCount, uploadBatchId } = req.body;
+    const { imageBase64, imageBase64s, filename, paperId, studentId, studentName, levelId, subIdx, sectionIndex, questionCount, uploadBatchId, replaceUploadedPaperId } = req.body;
     const images: string[] = Array.isArray(imageBase64s) && imageBase64s.length > 0
       ? imageBase64s
       : (imageBase64 ? [imageBase64] : []);
@@ -4097,6 +4138,22 @@ async function startServer() {
       const student = students.find(s => s.id === studentId);
       if (!student) return res.status(404).json({ error: 'Student not found.' });
       if (!canAccessStudent(user, student)) return res.status(403).json({ error: 'Forbidden.' });
+    }
+
+    // Re-check the replace target's status right before writing — it may
+    // have been graded in the gap between the check-duplicates call and this
+    // upload (e.g. another tab graded it), in which case silently
+    // overwriting its image would be wrong; the teacher needs to know it's
+    // no longer a pending duplicate.
+    let replaceTarget: UploadedPaper | undefined;
+    if (replaceUploadedPaperId) {
+      replaceTarget = await dbStore.getUploadedPaperById(replaceUploadedPaperId);
+      if (!replaceTarget) {
+        return res.status(404).json({ error: 'The paper to replace no longer exists.' });
+      }
+      if (replaceTarget.gradingStatus !== 'pending') {
+        return res.status(409).json({ error: 'This paper has already been graded and can no longer be replaced.' });
+      }
     }
 
     try {
@@ -4127,7 +4184,24 @@ async function startServer() {
       const imageUrl = `/output/uploads/${savedFileName}`;
 
       let uploadedPaperId: string | null = null;
-      if (paperId && studentId) {
+      if (replaceTarget) {
+        // Replace in place: keep the record's id/uploadedAt/uploadBatchId so
+        // it stays the same row in the pending-papers list, just pointing at
+        // the new image. The old photo was presumably wrong/unreadable —
+        // delete it from disk (best-effort; a failure here shouldn't fail
+        // the upload itself, it just leaves one orphaned file).
+        await dbStore.updateUploadedPaper(replaceTarget.id, {
+          imageUrl,
+          studentName: studentName || replaceTarget.studentName
+        });
+        uploadedPaperId = replaceTarget.id;
+        try {
+          const oldFilePath = path.join(ROOT_DIR, replaceTarget.imageUrl.replace(/^\//, ''));
+          fs.unlinkSync(oldFilePath);
+        } catch (unlinkErr) {
+          console.warn('Failed to delete replaced paper image (non-fatal):', unlinkErr);
+        }
+      } else if (paperId && studentId) {
         const sourcePaper = await dbStore.getMicroPracticePaperById(paperId);
         const totalParts = sourcePaper?.parts?.length || 1;
         const uploadedPaper: UploadedPaper = {
@@ -4380,7 +4454,34 @@ async function startServer() {
       scoped = [];
     }
 
-    const due = scoped.filter(s => !s.resolved && new Date(s.nextDueDate) <= now);
+    let due = scoped.filter(s => !s.resolved && new Date(s.nextDueDate) <= now);
+    if (due.length === 0) return res.json(due);
+
+    // Exclude (studentId, competency) pairs that already have a pending,
+    // ungraded uploaded paper covering that competency — generating a new
+    // paper for it doesn't make sense while one is already awaiting grading.
+    const relevantStudentIds = new Set(due.map(s => s.studentId));
+    const uploadedPapers = await dbStore.getUploadedPapers();
+    const pendingUploads = uploadedPapers.filter(p => p.gradingStatus === 'pending' && relevantStudentIds.has(p.studentId));
+
+    if (pendingUploads.length > 0) {
+      const papers = await dbStore.getMicroPracticePapersByIds(pendingUploads.map(p => p.paperId));
+      const paperById = new Map(papers.map(p => [p.id, p]));
+
+      const outstandingKeys = new Set<string>();
+      for (const up of pendingUploads) {
+        const paper = paperById.get(up.paperId);
+        if (!paper) continue;
+        const competencies = paper.parts?.length ? paper.parts.map(pt => pt.competency) : (paper.competency ? [paper.competency] : []);
+        for (const comp of competencies) {
+          if (!comp || up.gradedCompetencies.includes(comp)) continue;
+          outstandingKeys.add(`${up.studentId}::${comp}`);
+        }
+      }
+
+      due = due.filter(s => !outstandingKeys.has(`${s.studentId}::${s.competency}`));
+    }
+
     res.json(due);
   });
 
@@ -4396,6 +4497,20 @@ async function startServer() {
     const students = await dbStore.getStudents();
     const student = students.find(s => s.id === studentId);
     if (!student) return res.status(404).json({ error: 'Student not found.' });
+
+    // Reject re-grading a competency that was already graded for this exact
+    // paper — without this, resubmitting the same paperId+competency (e.g. a
+    // duplicate upload graded twice, or a teacher hitting submit again) would
+    // silently re-score and double-advance the student's PracticeSchedule
+    // (subIdx/interval) a second time for work that was already counted.
+    // Keyed on the specific competency, not overall gradingStatus, since a
+    // multi-part paper is graded one competency at a time.
+    if (paperId) {
+      const existingUploadedPaper = await dbStore.getUploadedPaperByPaperId(paperId);
+      if (existingUploadedPaper?.gradedCompetencies.includes(competency)) {
+        return res.status(409).json({ error: `This competency (${competency}) has already been graded for this paper.` });
+      }
+    }
 
     // Find or create the schedule now, at actual submission time (a no-op
     // find in the normal flow, since generation already creates/backfills it
