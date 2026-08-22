@@ -71,12 +71,12 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
     const [studentCompetencyOptions, setStudentCompetencyOptions] = useState<string[]>([]);
     const [showUploadPaper, setShowUploadPaper] = useState(false);
     const [identifiedPaper, setIdentifiedPaper] = useState<any | null>(null);
-    // The uploadBatchId shared by every paper in the batch currently being
-    // graded, or null when viewing a standalone paper. Batch membership
-    // itself is always derived live from pendingPapers (see activeBatchSiblings
-    // below) rather than snapshotted here, so it shrinks automatically as
-    // students get graded.
-    const [activeBatchKey, setActiveBatchKey] = useState<string | null>(null);
+    // The class+date group key (see getGroupKeyForPaper) shared by every
+    // paper in the group currently being graded, or null when viewing a
+    // standalone paper. Group membership itself is always derived live from
+    // pendingPapers (see activeBatchSiblings below) rather than snapshotted
+    // here, so it shrinks automatically as students get graded.
+    const [activeGroupKey, setActiveGroupKey] = useState<string | null>(null);
     const [pendingPapers, setPendingPapers] = useState<any[]>([]);
     const [loadingPending, setLoadingPending] = useState(true);
     const [uploadSummaryMessage, setUploadSummaryMessage] = useState<string | null>(null);
@@ -431,8 +431,8 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
     // answers on the paper being left — matches today's behavior, where
     // "Save & Grade Later" is the only explicit way to persist a draft.
     const goToBatchSibling = (offset: number) => {
-        if (!activeBatchKey || !identifiedPaper) return;
-        const siblings = pendingPapers.filter(p => p.uploadBatchId === activeBatchKey);
+        if (!activeGroupKey || !identifiedPaper) return;
+        const siblings = pendingPapers.filter(p => getGroupKeyForPaper(p) === activeGroupKey);
         const currentIndex = siblings.findIndex(p => p.paperId === identifiedPaper.paperId);
         if (currentIndex === -1) return;
         const targetIndex = currentIndex + offset;
@@ -454,9 +454,9 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
         fetchProgress();
         fetchPendingPapers();
 
-        if (reason === 'graded' && activeBatchKey && identifiedPaper) {
+        if (reason === 'graded' && activeGroupKey && identifiedPaper) {
             const remainingSiblings = pendingPapers.filter(
-                p => p.uploadBatchId === activeBatchKey && p.paperId !== identifiedPaper.paperId
+                p => getGroupKeyForPaper(p) === activeGroupKey && p.paperId !== identifiedPaper.paperId
             );
             if (remainingSiblings.length > 0) {
                 openPendingPaper(remainingSiblings[0]);
@@ -464,7 +464,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
             }
         }
         setIdentifiedPaper(null);
-        setActiveBatchKey(null);
+        setActiveGroupKey(null);
     };
 
     // Classes derived from the already-fetched student list's own
@@ -495,6 +495,19 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
     const getStudentClass = (studentId: string) => {
         const s = students.find(st => st.id === studentId);
         return s ? { className: s.classGroup || 'Unknown', section: s.section || '' } : null;
+    };
+
+    // Groups papers on Papers Awaiting Grading by class+upload-date rather
+    // than by upload batch — all papers for the same class uploaded on the
+    // same day belong together regardless of which upload action created
+    // them. Falls back to a per-paper unique key when the student's class
+    // can't be resolved, so such a paper renders standalone instead of being
+    // merged into a false "unknown class" bucket (same precedent as the old
+    // uploadBatchId-or-id fallback).
+    const getGroupKeyForPaper = (p: any): string => {
+        const cls = getStudentClass(p.studentId);
+        const dateKey = new Date(p.uploadedAt).toLocaleDateString();
+        return cls ? `${dateKey}__${cls.className}::${cls.section}` : `solo:${p.id}`;
     };
 
     // Due Today / Overdue grouping. /api/practice/due only ever returns items
@@ -549,7 +562,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                             {generateMode === 'none' ? '+ Generate Practice Paper' : 'Close'}
                         </button>
                         <button
-                            onClick={() => { setShowUploadPaper(!showUploadPaper); setIdentifiedPaper(null); setActiveBatchKey(null); }}
+                            onClick={() => { setShowUploadPaper(!showUploadPaper); setIdentifiedPaper(null); setActiveGroupKey(null); }}
                             className="bg-emerald-700 text-white font-medium text-xs py-1.5 px-3 rounded-md hover:bg-emerald-600"
                         >
                             {showUploadPaper ? 'Close' : '+ Upload Completed Paper'}
@@ -565,7 +578,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                     onPaperIdentified={(results) => {
                         setShowUploadPaper(false);
                         if (results.length === 1) {
-                            setActiveBatchKey(null);
+                            setActiveGroupKey(null);
                             setIdentifiedPaper(results[0]);
                         } else {
                             setUploadSummaryMessage(`${results.length} papers uploaded and added to your pending grading queue below.`);
@@ -583,11 +596,11 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
             )}
 
             {identifiedPaper && (() => {
-                const activeBatchSiblings = activeBatchKey
-                    ? pendingPapers.filter(p => p.uploadBatchId === activeBatchKey)
+                const activeBatchSiblings = activeGroupKey
+                    ? pendingPapers.filter(p => getGroupKeyForPaper(p) === activeGroupKey)
                     : [];
                 const currentBatchIndex = activeBatchSiblings.findIndex(p => p.paperId === identifiedPaper.paperId);
-                const batchNav = (activeBatchKey && currentBatchIndex !== -1 && activeBatchSiblings.length > 1)
+                const batchNav = (activeGroupKey && currentBatchIndex !== -1 && activeBatchSiblings.length > 1)
                     ? {
                         position: currentBatchIndex + 1,
                         total: activeBatchSiblings.length,
@@ -1115,70 +1128,31 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                             </h4>
                                             <div className="space-y-2">
                                                 {(Object.values(
-                                                    group.papers.reduce((batches: Record<string, { uploadBatchId: string; papers: any[] }>, p) => {
-                                                        // Group by uploadBatchId when present (a real shared batch);
-                                                        // otherwise fall back to the paper's own unique id so
-                                                        // batch-less papers never collapse into one fake group just
-                                                        // because they share an undefined key.
-                                                        const groupKey = p.uploadBatchId || p.id;
+                                                    group.papers.reduce((batches: Record<string, { groupKey: string; classLabel: { className: string; section: string } | null; papers: any[] }>, p) => {
+                                                        const groupKey = getGroupKeyForPaper(p);
                                                         if (!batches[groupKey]) {
-                                                            batches[groupKey] = { uploadBatchId: p.uploadBatchId ?? p.id, papers: [] };
+                                                            batches[groupKey] = { groupKey, classLabel: getStudentClass(p.studentId), papers: [] };
                                                         }
                                                         batches[groupKey].papers.push(p);
                                                         return batches;
                                                     }, {})
-                                                ) as { uploadBatchId: string; papers: any[] }[])
-                                                    .map(batch => {
-                                                        // Only badge the class when every student in this entry
-                                                        // shares the same one — a bulk batch spanning multiple
-                                                        // classes just omits the badge rather than showing a
-                                                        // misleading/invented "Mixed" label.
-                                                        const classes = batch.papers.map(p => getStudentClass(p.studentId));
-                                                        const first = classes[0];
-                                                        const sharedClass = first && classes.every(c => c && c.className === first.className && c.section === first.section)
-                                                            ? first
-                                                            : null;
-
-                                                        return batch.papers.length > 1 ? (
-                                                            <button
-                                                                key={batch.uploadBatchId}
-                                                                onClick={() => { setActiveBatchKey(batch.uploadBatchId); openPendingPaper(batch.papers[0]); }}
-                                                                className="w-full px-4 py-2 border border-zinc-100 rounded-lg bg-slate-50 hover:bg-zinc-100 hover:border-zinc-300 transition-colors text-left flex items-center justify-between gap-2"
-                                                            >
-                                                                <span className="font-medium text-sm text-zinc-800">
-                                                                    {batch.papers.map(p => p.studentName).join(', ')}
+                                                ) as { groupKey: string; classLabel: { className: string; section: string } | null; papers: any[] }[])
+                                                    .map(batch => (
+                                                        <button
+                                                            key={batch.groupKey}
+                                                            onClick={() => { setActiveGroupKey(batch.groupKey); openPendingPaper(batch.papers[0]); }}
+                                                            className="w-full px-4 py-2 border border-zinc-100 rounded-lg bg-slate-50 hover:bg-zinc-100 hover:border-zinc-300 transition-colors text-left flex items-center justify-between gap-2"
+                                                        >
+                                                            <span className="font-medium text-sm text-zinc-800">
+                                                                {batch.papers.map(p => p.studentName).join(', ')}
+                                                            </span>
+                                                            {batch.classLabel && (
+                                                                <span className="flex-shrink-0 rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
+                                                                    {batch.classLabel.className}{batch.classLabel.section ? ` - ${batch.classLabel.section}` : ''}
                                                                 </span>
-                                                                <span className="flex-shrink-0 flex items-center gap-1.5">
-                                                                    {sharedClass && (
-                                                                        <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
-                                                                            {sharedClass.className}{sharedClass.section ? ` - ${sharedClass.section}` : ''}
-                                                                        </span>
-                                                                    )}
-                                                                    <span className="rounded-full bg-indigo-100 dark:bg-indigo-950/40 px-2.5 py-0.5 text-[10px] font-bold text-indigo-700 dark:text-indigo-400 uppercase tracking-wider">
-                                                                        Bulk
-                                                                    </span>
-                                                                </span>
-                                                            </button>
-                                                        ) : (
-                                                            <button
-                                                                key={batch.papers[0].id}
-                                                                onClick={() => { setActiveBatchKey(null); openPendingPaper(batch.papers[0]); }}
-                                                                className="w-full px-4 py-2 border border-zinc-100 rounded-lg bg-slate-50 hover:bg-zinc-100 hover:border-zinc-300 transition-colors text-left flex items-center justify-between gap-2"
-                                                            >
-                                                                <span className="font-medium text-sm text-zinc-800">{batch.papers[0].studentName}</span>
-                                                                <span className="flex-shrink-0 flex items-center gap-1.5">
-                                                                    {sharedClass && (
-                                                                        <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
-                                                                            {sharedClass.className}{sharedClass.section ? ` - ${sharedClass.section}` : ''}
-                                                                        </span>
-                                                                    )}
-                                                                    <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-0.5 text-[10px] font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
-                                                                        Individual
-                                                                    </span>
-                                                                </span>
-                                                            </button>
-                                                        );
-                                                    })}
+                                                            )}
+                                                        </button>
+                                                    ))}
                                             </div>
                                         </div>
                                     ))}

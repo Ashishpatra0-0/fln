@@ -8477,6 +8477,78 @@ const DRAW_COUNT_REFERENCE_RENDERERS = {
   ).join('')
 };
 
+/* Micro-Practice-only: a handful of composite generators split their output
+   across multiple named count params (matchCount/fillCount/vertCount, etc.)
+   instead of reading `p.n`, so overriding `.n` alone (below) has no effect
+   on them. This maps the requested questionCount onto the SAME params those
+   generators already read, so their own (working) logic produces the right
+   size — no changes to the generators themselves.
+   Most entries are 1:1 (one param increment = one question). A few build
+   multi-box "rows" (e.g. ordering-listed-boxes writes `numPerRow` boxes per
+   ascCount/descCount unit) — for those, `unitParam`/`unitDefault` says how
+   many answers one row produces, so we can convert an answer-count target
+   into a row count. Those three are therefore approximate (nearest whole
+   row), not exact. */
+const MICRO_PRACTICE_COUNT_PARAMS = {
+  'addition-add-and-match': ['matchCount', 'fillCount', 'vertCount'],
+  'subtraction-subtract-and-match': ['matchCount', 'fillCount', 'vertCount'],
+  'add-subtract-match-mixed': ['addCount', 'subCount'],
+  'comparison-mixed-circle': ['compareCount', 'circleCount'],
+  'angle-compare-mixed': ['circleCount', 'arrangeCount'],
+  'measuring-tool-mixed': ['rulerCount', 'scaleCount', 'jarCount'],
+  'data-tally-chart-qa': ['qCount'],
+  'data-pictograph-qa': ['qCount'],
+  'data-bargraph-qa': ['qCount'],
+  'hand-number-mini-panels': ['rowsPerPanel'],
+  'ordering-listed-boxes': [
+    { key: 'ascCount', unitParam: 'numPerRow', unitDefault: 6 },
+    { key: 'descCount', unitParam: 'numPerRow', unitDefault: 6 },
+  ],
+  'ordering-box-grid': [
+    { key: 'ascCount', unitParam: 'numPerRow', unitDefault: 4 },
+    { key: 'descCount', unitParam: 'numPerRow', unitDefault: 4 },
+  ],
+  'ordering-mixed-circle': [
+    { key: 'ascCount', unitParam: 'numPerGroup', unitDefault: 3 },
+    { key: 'descCount', unitParam: 'numPerGroup', unitDefault: 3 },
+    { key: 'largestCount' },
+    { key: 'smallestCount' },
+  ],
+};
+
+/* Even split of `total` across `numParts` slots, remainder to the first
+   slots; if there are fewer questions requested than there are parts,
+   everything goes into the first (simplest) part and the rest are zeroed. */
+function distributeCount(total, numParts) {
+  if (numParts <= 0) return [];
+  if (total < numParts) {
+    const result = new Array(numParts).fill(0);
+    result[0] = total;
+    return result;
+  }
+  const base = Math.floor(total / numParts);
+  const remainder = total % numParts;
+  return Array.from({ length: numParts }, (_, i) => base + (i < remainder ? 1 : 0));
+}
+
+/* Turns a MICRO_PRACTICE_COUNT_PARAMS spec + requested questionCount into
+   concrete param overrides for one section's generator call. */
+function computeMicroPracticeCountOverrides(sectionType, sectionParams, questionCount) {
+  const spec = MICRO_PRACTICE_COUNT_PARAMS[sectionType];
+  if (!spec) return null;
+  const shares = distributeCount(questionCount, spec.length);
+  const overrides = {};
+  spec.forEach((entry, i) => {
+    if (typeof entry === 'string') {
+      overrides[entry] = shares[i];
+    } else {
+      const unit = entry.unitParam ? (sectionParams[entry.unitParam] || entry.unitDefault || 1) : 1;
+      overrides[entry.key] = Math.max(0, Math.round(shares[i] / unit));
+    }
+  });
+  return overrides;
+}
+
 /* Builds a single-section, single-page micro-practice set: looks up the
    level, re-runs its build(subIdx) section list, pulls out ONE section by
    index, and re-runs its generator with an overridden question count.
@@ -8506,7 +8578,8 @@ function generateMicroSet(levelId, subIdx, sectionIndex, questionCount, opts){
   const gen = GENERATORS[sd.type];
   if (!gen) return { error: `Unknown generator type: ${sd.type}` };
 
-  const overriddenParams = { ...sd.params, n: questionCount };
+  const countOverrides = computeMicroPracticeCountOverrides(sd.type, sd.params, questionCount);
+  const overriddenParams = { ...sd.params, n: questionCount, ...countOverrides };
   const qc = { n: 1 };
   const sectionId = 'S01';
   const { html, answers } = gen(overriddenParams, subIdx, qc, sectionId, sd.name);
