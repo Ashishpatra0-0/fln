@@ -3,12 +3,18 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { UserRole } from '../types';
 import { MicroPracticePaperUpload } from './MicroPracticePaperUpload';
 import { MicroPracticeAnswerEntry } from './MicroPracticeAnswerEntry';
-import { User, Users, FileCheck, Clock, ChevronDown, TrendingUp, Upload } from 'lucide-react';
+import { User, Users, FileCheck, Clock, ChevronDown, TrendingUp, Upload, ClipboardCheck, Printer } from 'lucide-react';
 
 interface Props {
     token: string;
     userRole: UserRole;
 }
+
+// Sentinel activeGroupKey value meaning "every pending paper, across all
+// class+date groups" — used by "Grade All". getGroupKeyForPaper's real
+// return shapes (`${date}__${class}::${section}` or `solo:${id}`) can never
+// collide with this.
+const ALL_PAPERS_KEY = '__all__';
 
 const ALL_COMPETENCIES = [
     'Number Sense',
@@ -432,7 +438,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
     // "Save & Grade Later" is the only explicit way to persist a draft.
     const goToBatchSibling = (offset: number) => {
         if (!activeGroupKey || !identifiedPaper) return;
-        const siblings = pendingPapers.filter(p => getGroupKeyForPaper(p) === activeGroupKey);
+        const siblings = getActiveGroupSiblings();
         const currentIndex = siblings.findIndex(p => p.paperId === identifiedPaper.paperId);
         if (currentIndex === -1) return;
         const targetIndex = currentIndex + offset;
@@ -455,9 +461,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
         fetchPendingPapers();
 
         if (reason === 'graded' && activeGroupKey && identifiedPaper) {
-            const remainingSiblings = pendingPapers.filter(
-                p => getGroupKeyForPaper(p) === activeGroupKey && p.paperId !== identifiedPaper.paperId
-            );
+            const remainingSiblings = getActiveGroupSiblings().filter(p => p.paperId !== identifiedPaper.paperId);
             if (remainingSiblings.length > 0) {
                 openPendingPaper(remainingSiblings[0]);
                 return;
@@ -508,6 +512,47 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
         const cls = getStudentClass(p.studentId);
         const dateKey = new Date(p.uploadedAt).toLocaleDateString();
         return cls ? `${dateKey}__${cls.className}::${cls.section}` : `solo:${p.id}`;
+    };
+
+    // Flattens pendingPapers into the exact linear order the "Papers Awaiting
+    // Grading" list below renders them in (date groups newest-first, then
+    // class-batches in the same first-encountered order that render's own
+    // grouping produces) — used by "Grade All" so Next/Previous matches "the
+    // next one down the visual list," not an arbitrary fetch order.
+    const getVisualPendingOrder = (): any[] => {
+        const dateGroups = Object.values(
+            pendingPapers.reduce((groups: Record<string, { dateKey: string; timestamp: number; papers: any[] }>, p) => {
+                const dateKey = new Date(p.uploadedAt).toLocaleDateString();
+                if (!groups[dateKey]) {
+                    groups[dateKey] = { dateKey, timestamp: new Date(p.uploadedAt).getTime(), papers: [] };
+                }
+                groups[dateKey].papers.push(p);
+                return groups;
+            }, {})
+        ) as { dateKey: string; timestamp: number; papers: any[] }[];
+
+        const ordered: any[] = [];
+        for (const group of [...dateGroups].sort((a, b) => b.timestamp - a.timestamp)) {
+            const batches = Object.values(
+                group.papers.reduce((acc: Record<string, any[]>, p) => {
+                    const groupKey = getGroupKeyForPaper(p);
+                    (acc[groupKey] ??= []).push(p);
+                    return acc;
+                }, {})
+            ) as any[][];
+            for (const batch of batches) ordered.push(...batch);
+        }
+        return ordered;
+    };
+
+    // Resolves the sibling list for whatever activeGroupKey currently means —
+    // one specific class+date group, or (ALL_PAPERS_KEY) every pending paper
+    // in visual order. Used by Previous/Next, the batchNav position/total,
+    // and the graded-auto-advance logic, so all three stay in sync.
+    const getActiveGroupSiblings = (): any[] => {
+        if (!activeGroupKey) return [];
+        if (activeGroupKey === ALL_PAPERS_KEY) return getVisualPendingOrder();
+        return pendingPapers.filter(p => getGroupKeyForPaper(p) === activeGroupKey);
     };
 
     // A student can have more than one pending paper in the same class+date
@@ -609,9 +654,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
             )}
 
             {identifiedPaper && (() => {
-                const activeBatchSiblings = activeGroupKey
-                    ? pendingPapers.filter(p => getGroupKeyForPaper(p) === activeGroupKey)
-                    : [];
+                const activeBatchSiblings = getActiveGroupSiblings();
                 const currentBatchIndex = activeBatchSiblings.findIndex(p => p.paperId === identifiedPaper.paperId);
                 const batchNav = (activeGroupKey && currentBatchIndex !== -1 && activeBatchSiblings.length > 1)
                     ? {
@@ -1007,9 +1050,9 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                     )}
 
                     {(bulkGenerating || bulkJob?.status === 'running') && (
-                        <div className="flex items-center gap-3 p-4 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg">
+                        <div className="flex items-center justify-center gap-3 p-4 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg">
                             <span className="animate-spin text-xl">⏳</span>
-                            <div>
+                            <div className="text-center">
                                 <p className="text-sm font-semibold text-blue-800 dark:text-blue-200">Generating Micro-Practice Papers...</p>
                                 <p className="text-xs text-blue-600 dark:text-blue-400">
                                     {bulkJob ? `${bulkJob.completed} / ${bulkJob.total} papers generated` : 'Starting...'}
@@ -1021,76 +1064,76 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                     {bulkJob?.status === 'completed' && (() => {
                         const successCount = bulkJob.results.filter((r: any) => !r.skipped).length;
                         return (
-                        <div className="space-y-4">
-                            <div className="flex items-center justify-between">
-                                <span className="text-green-700 dark:text-green-300 font-bold text-sm">
-                                    ✅ {successCount} Micro-Practice Paper{successCount !== 1 ? 's' : ''} Generated Successfully
-                                </span>
-                                <button onClick={closeGeneratePanel} className="text-xs font-bold text-indigo-600 hover:underline">
-                                    Done
-                                </button>
-                            </div>
-                            <div className="p-4 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg space-y-3">
-                                <div className="flex gap-3 flex-wrap">
-                                    {bulkJob.combinedPdfUrl && (
-                                        <a
-                                            href={bulkJob.combinedPdfUrl}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            className="inline-flex items-center gap-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-mono font-bold px-4 py-2.5 rounded-lg transition-colors cursor-pointer shadow-sm"
-                                        >
-                                            🖨️ Print / Open PDF ({successCount} Paper{successCount !== 1 ? 's' : ''})
-                                        </a>
-                                    )}
-                                    {bulkJob.zipUrl && (
-                                        <a
-                                            href={bulkJob.zipUrl}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            className="inline-flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-mono font-bold px-4 py-2.5 rounded-lg transition-colors cursor-pointer shadow-sm"
-                                        >
-                                            ⬇️ Download All as ZIP
-                                        </a>
-                                    )}
-                                    {!bulkJob.combinedPdfUrl && !bulkJob.zipUrl && (
-                                        <p className="text-sm text-zinc-500">No papers were generated — see reasons below.</p>
-                                    )}
+                            <div className="space-y-4">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-green-700 dark:text-green-300 font-bold text-sm">
+                                        ✅ {successCount} Micro-Practice Paper{successCount !== 1 ? 's' : ''} Generated Successfully
+                                    </span>
+                                    <button onClick={closeGeneratePanel} className="text-xs font-bold text-indigo-600 hover:underline">
+                                        Done
+                                    </button>
+                                </div>
+                                <div className="p-4 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg space-y-3">
+                                    <div className="flex gap-3 flex-wrap">
+                                        {bulkJob.combinedPdfUrl && (
+                                            <a
+                                                href={bulkJob.combinedPdfUrl}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="inline-flex items-center gap-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-mono font-bold px-4 py-2.5 rounded-lg transition-colors cursor-pointer shadow-sm"
+                                            >
+                                                🖨️ Print / Open PDF ({successCount} Paper{successCount !== 1 ? 's' : ''})
+                                            </a>
+                                        )}
+                                        {bulkJob.zipUrl && (
+                                            <a
+                                                href={bulkJob.zipUrl}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="inline-flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-mono font-bold px-4 py-2.5 rounded-lg transition-colors cursor-pointer shadow-sm"
+                                            >
+                                                ⬇️ Download All as ZIP
+                                            </a>
+                                        )}
+                                        {!bulkJob.combinedPdfUrl && !bulkJob.zipUrl && (
+                                            <p className="text-sm text-zinc-500">No papers were generated — see reasons below.</p>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="border border-zinc-200 rounded-lg overflow-hidden overflow-x-auto">
+                                    <table className="w-full text-sm">
+                                        <thead className="bg-zinc-50 dark:bg-zinc-800">
+                                            <tr>
+                                                <th className="text-left font-medium text-zinc-600 dark:text-zinc-300 p-2.5">Student</th>
+                                                <th className="text-left font-medium text-zinc-600 dark:text-zinc-300 p-2.5">Result</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                                            {bulkJob.results.map((r: any) => (
+                                                <tr key={r.studentId}>
+                                                    <td className="p-2.5 text-zinc-800 dark:text-zinc-100">{r.studentName || r.studentId}</td>
+                                                    <td className="p-2.5">
+                                                        {r.skipped ? (
+                                                            <span className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded border border-amber-200">
+                                                                Skipped — {r.reason}
+                                                            </span>
+                                                        ) : (
+                                                            <a
+                                                                href={r.pdfUrl}
+                                                                target="_blank"
+                                                                rel="noreferrer"
+                                                                className="text-xs font-bold text-indigo-600 hover:underline"
+                                                            >
+                                                                Open PDF
+                                                            </a>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
                                 </div>
                             </div>
-                            <div className="border border-zinc-200 rounded-lg overflow-hidden overflow-x-auto">
-                                <table className="w-full text-sm">
-                                    <thead className="bg-zinc-50 dark:bg-zinc-800">
-                                        <tr>
-                                            <th className="text-left font-medium text-zinc-600 dark:text-zinc-300 p-2.5">Student</th>
-                                            <th className="text-left font-medium text-zinc-600 dark:text-zinc-300 p-2.5">Result</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                                        {bulkJob.results.map((r: any) => (
-                                            <tr key={r.studentId}>
-                                                <td className="p-2.5 text-zinc-800 dark:text-zinc-100">{r.studentName || r.studentId}</td>
-                                                <td className="p-2.5">
-                                                    {r.skipped ? (
-                                                        <span className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded border border-amber-200">
-                                                            Skipped — {r.reason}
-                                                        </span>
-                                                    ) : (
-                                                        <a
-                                                            href={r.pdfUrl}
-                                                            target="_blank"
-                                                            rel="noreferrer"
-                                                            className="text-xs font-bold text-indigo-600 hover:underline"
-                                                        >
-                                                            Open PDF
-                                                        </a>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
                         );
                     })()}
 
@@ -1107,11 +1150,27 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="relative bg-white/90 dark:bg-slate-900/90 backdrop-blur-md rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm p-6 space-y-4">
-                    <div className="border-b border-slate-100 dark:border-slate-800 pb-3 flex items-center gap-2">
-                        <FileCheck className="h-4 w-4 text-amber-500" />
-                        <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                            Papers Awaiting Grading
-                        </h3>
+                    <div className="border-b border-slate-100 dark:border-slate-800 pb-3 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                            <FileCheck className="h-4 w-4 text-amber-500" />
+                            <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                                Papers Awaiting Grading
+                            </h3>
+                        </div>
+                        {pendingPapers.length > 0 && (
+                            <button
+                                onClick={() => {
+                                    const ordered = getVisualPendingOrder();
+                                    if (ordered.length === 0) return;
+                                    setActiveGroupKey(ALL_PAPERS_KEY);
+                                    openPendingPaper(ordered[0]);
+                                }}
+                                className="flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-mono font-bold shrink-0 cursor-pointer transition border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:bg-amber-950/40 dark:border-amber-800 dark:text-amber-300"
+                            >
+                                <ClipboardCheck className="h-3.5 w-3.5 shrink-0" />
+                                <span className="text-[10px] tracking-wider">Grade All</span>
+                            </button>
+                        )}
                     </div>
                     {!loadingPending && pendingPapers.length === 0 && (
                         <div className="absolute inset-0 flex items-center justify-center text-center text-zinc-400 text-sm px-10">
@@ -1120,7 +1179,9 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                     )}
                     <div className="h-[256px] overflow-y-auto pr-1.5 custom-scrollbar">
                         {loadingPending ? (
-                            <p className="text-sm text-zinc-400">Loading...</p>
+                            <div className="h-full flex items-center justify-center">
+                                <p className="text-sm text-zinc-400">Loading...</p>
+                            </div>
                         ) : pendingPapers.length === 0 ? null : (
                             <div className="space-y-4">
                                 {(Object.values(
@@ -1160,7 +1221,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                                                 {formatGroupNames(batch.papers)}
                                                             </span>
                                                             {batch.classLabel && (
-                                                                <span className="flex-shrink-0 rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
+                                                                <span className="flex-shrink-0 rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 text-[10px] font-mono font-semibold text-slate-600 dark:text-slate-400 tracking-wider">
                                                                     {batch.classLabel.className}{batch.classLabel.section ? ` - ${batch.classLabel.section}` : ''}
                                                                 </span>
                                                             )}
@@ -1174,11 +1235,25 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                     </div>
                 </div>
                 <div className="relative bg-white/90 dark:bg-slate-900/90 backdrop-blur-md rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm p-6 space-y-4">
-                    <div className="border-b border-slate-100 dark:border-slate-800 pb-3 flex items-center gap-2">
-                        <Clock className="h-4 w-4 text-indigo-500" />
-                        <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                            Due Today
-                        </h3>
+                    <div className="border-b border-slate-100 dark:border-slate-800 pb-3 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                            <Clock className="h-4 w-4 text-indigo-500" />
+                            <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                                Due Today
+                            </h3>
+                        </div>
+                        {dueList.length > 0 && (
+                            <button
+                                onClick={() => triggerDueBulkGenerate(
+                                    'All Classes',
+                                    dueClassGroups.flatMap(g => g.students).map(sg => ({ studentId: sg.studentId, studentName: sg.studentName, competencies: sg.competencies }))
+                                )}
+                                className="flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-mono font-bold shrink-0 cursor-pointer transition border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:border-indigo-800 dark:text-indigo-300"
+                            >
+                                <Printer className="h-3.5 w-3.5 shrink-0" />
+                                <span className="text-[10px] tracking-wider">Generate All</span>
+                            </button>
+                        )}
                     </div>
                     {!loading && dueList.length === 0 && (
                         <div className="absolute inset-0 flex items-center justify-center text-center text-zinc-400 text-sm px-10">
@@ -1187,7 +1262,9 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                     )}
                     <div className="h-[256px] overflow-y-auto pr-1.5 custom-scrollbar">
                         {loading ? (
-                            <p className="text-sm text-zinc-400">Loading...</p>
+                            <div className="h-full flex items-center justify-center">
+                                <p className="text-sm text-zinc-400">Loading...</p>
+                            </div>
                         ) : dueList.length === 0 ? null : (
                             <div className="space-y-4">
                                 {dueClassGroups.map(group => {
@@ -1262,7 +1339,9 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                 </div>
 
                 {loadingProgress ? (
-                    <p className="text-sm text-zinc-400">Loading...</p>
+                    <div className="flex items-center justify-center p-8">
+                        <p className="text-sm text-zinc-400">Loading...</p>
+                    </div>
                 ) : progressData.length === 0 ? (
                     <div className="p-8 border border-dashed border-zinc-200 rounded-xl bg-zinc-50 text-center text-zinc-400 text-sm">
                         No completed practice sessions yet. Once a student completes a practice set, their scores will appear here.
@@ -1545,14 +1624,16 @@ const StudentProgressChart: React.FC<StudentProgressChartProps> = ({ progressDat
                     {renderSeries.map(s => (
                         <div key={s.name} className="flex items-center gap-2">
                             <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: s.color.dot }} />
-                            <span className="text-xs font-medium text-zinc-600 dark:text-zinc-300">{s.name}</span>
+                            <span className="text-xs font-mono font-medium text-zinc-600 dark:text-zinc-300">{s.name}</span>
                         </div>
                     ))}
                 </div>
             )}
 
             {historyLoading ? (
-                <p className="text-sm text-zinc-400">Loading...</p>
+                <div className="flex items-center justify-center p-8">
+                    <p className="text-sm text-zinc-400">Loading...</p>
+                </div>
             ) : n === 0 ? (
                 <p className="text-sm text-zinc-400">No practice history found for this student.</p>
             ) : (
