@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { UserRole } from '../types';
 import { MicroPracticePaperUpload } from './MicroPracticePaperUpload';
 import { MicroPracticeAnswerEntry } from './MicroPracticeAnswerEntry';
-import { User, Users, FileCheck, Clock, ChevronDown, TrendingUp } from 'lucide-react';
+import { User, Users, FileCheck, Clock, ChevronDown, TrendingUp, Upload } from 'lucide-react';
 
 interface Props {
     token: string;
@@ -576,9 +576,9 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                         </button>
                         <button
                             onClick={() => { setShowUploadPaper(!showUploadPaper); setIdentifiedPaper(null); setActiveGroupKey(null); }}
-                            className="bg-emerald-700 text-white font-medium text-xs py-1.5 px-3 rounded-md hover:bg-emerald-600"
+                            className="bg-emerald-700 text-white font-medium text-xs py-1.5 px-3 rounded-md hover:bg-emerald-600 flex items-center gap-1.5"
                         >
-                            {showUploadPaper ? 'Close' : '+ Upload Completed Paper'}
+                            {showUploadPaper ? 'Close' : <><Upload className="h-4 w-4" /> Upload Completed Paper</>}
                         </button>
                     </div>
                 )}
@@ -782,7 +782,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                 Open / Print PDF
                             </a>
                             <p className="text-xs text-zinc-500">
-                                Print this, have the student complete it, then use "+ Upload Completed Paper" to grade it.
+                                Print this, have the student complete it, then use "Upload Completed Paper" to grade it.
                             </p>
                             <div>
                                 <button

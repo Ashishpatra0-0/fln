@@ -4,7 +4,7 @@ import { apiFetch } from '../services/apiClient';
 import {
   Menu, X, Search, Bell, Sun, Moon, LogOut, ChevronRight, ChevronLeft, ChevronDown,
   LayoutDashboard, BookOpen, UserCheck, Calendar, ShieldCheck, HelpCircle, Settings, Users,
-  School, GraduationCap, MapPin, BarChart3, FileText, ClipboardList, ShieldAlert, KeyRound, Clock, Database
+  School, GraduationCap, MapPin, BarChart3, FileText, ClipboardList, ShieldAlert, KeyRound, Clock, Database, Repeat
 } from 'lucide-react';
 
 interface NavigationItem {
@@ -146,7 +146,7 @@ export const Layout: React.FC<LayoutProps> = ({
         });
         list.push({ name: 'Worksheets', view: 'worksheets', icon: ClipboardList });
         list.push({ name: 'Reports', view: 'reports', icon: FileText });
-        list.push({ name: 'Micro-Practice', view: 'micro-practice', icon: BookOpen });
+        list.push({ name: 'Micro-Practice', view: 'micro-practice', icon: Repeat });
         break;
 
       case UserRole.VOLUNTEER:
@@ -172,7 +172,7 @@ export const Layout: React.FC<LayoutProps> = ({
         });
         list.push({ name: 'Worksheets', view: 'worksheets', icon: ClipboardList });
         list.push({ name: 'Reports', view: 'reports', icon: FileText });
-        list.push({ name: 'Micro-Practice', view: 'micro-practice', icon: BookOpen });
+        list.push({ name: 'Micro-Practice', view: 'micro-practice', icon: Repeat });
         break;
 
       case UserRole.SCHOOL:
