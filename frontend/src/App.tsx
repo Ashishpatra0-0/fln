@@ -156,7 +156,7 @@ export default function App() {
       case 'school':
         return <SchoolDashboard user={currentUser} token={token!} />;
       case 'teacher':
-        return <TeacherDashboard user={currentUser} token={token!} />;
+        return <TeacherDashboard user={currentUser} token={token!} onNavigate={setActivePanel} />;
       case 'volunteer':
         return <VolunteerDashboard user={currentUser} token={token!} />;
       default:

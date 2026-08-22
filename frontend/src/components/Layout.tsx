@@ -4,7 +4,7 @@ import { apiFetch } from '../services/apiClient';
 import {
   Menu, X, Search, Bell, Sun, Moon, LogOut, ChevronRight, ChevronLeft, ChevronDown,
   LayoutDashboard, BookOpen, UserCheck, Calendar, ShieldCheck, HelpCircle, Settings, Users,
-  School, GraduationCap, MapPin, BarChart3, FileText, ClipboardList, ShieldAlert, KeyRound, Clock, Database, Repeat, Home
+  School, GraduationCap, MapPin, BarChart3, ClipboardList, ShieldAlert, KeyRound, Clock, Database, Repeat, Home
 } from 'lucide-react';
 import { LanguageSwitcher } from './LanguageSwitcher';
 
@@ -147,7 +147,6 @@ export const Layout: React.FC<LayoutProps> = ({
           ]
         });
         list.push({ name: 'Worksheets', view: 'worksheets', icon: ClipboardList });
-        list.push({ name: 'Reports', view: 'reports', icon: FileText });
         list.push({ name: 'Micro-Practice', view: 'micro-practice', icon: Repeat });
         break;
 
@@ -173,7 +172,6 @@ export const Layout: React.FC<LayoutProps> = ({
           ]
         });
         list.push({ name: 'Worksheets', view: 'worksheets', icon: ClipboardList });
-        list.push({ name: 'Reports', view: 'reports', icon: FileText });
         list.push({ name: 'Micro-Practice', view: 'micro-practice', icon: Repeat });
         break;
 
@@ -182,27 +180,23 @@ export const Layout: React.FC<LayoutProps> = ({
         list.push({ name: 'Students', view: 'students', icon: GraduationCap });
         list.push({ name: 'Performance', view: 'performance', icon: BarChart3 });
         list.push({ name: 'Analytics', view: 'analytics', icon: BarChart3 });
-        list.push({ name: 'Reports', view: 'reports', icon: FileText });
         break;
 
       case UserRole.BLOCK_ADMIN:
         list.push({ name: 'Schools', view: 'schools', icon: School });
         list.push({ name: 'Teachers', view: 'teachers', icon: Users });
         list.push({ name: 'Performance', view: 'performance', icon: BarChart3 });
-        list.push({ name: 'Reports', view: 'reports', icon: FileText });
         list.push({ name: 'Analytics', view: 'analytics', icon: BarChart3 });
         break;
 
       case UserRole.DISTRICT_ADMIN:
         list.push({ name: 'Blocks', view: 'blocks', icon: MapPin });
         list.push({ name: 'Schools', view: 'schools', icon: School });
-        list.push({ name: 'Reports', view: 'reports', icon: FileText });
         list.push({ name: 'Analytics', view: 'analytics', icon: BarChart3 });
         break;
 
       case UserRole.ADMIN:
         list.push({ name: 'Districts', view: 'districts', icon: MapPin });
-        list.push({ name: 'Reports', view: 'reports', icon: FileText });
         list.push({ name: 'Analytics', view: 'analytics', icon: BarChart3 });
         break;
 
@@ -211,7 +205,6 @@ export const Layout: React.FC<LayoutProps> = ({
         list.push({ name: 'Schools', view: 'schools', icon: School });
         list.push({ name: 'Worksheet Templates', view: 'worksheet_templates', icon: ClipboardList });
         list.push({ name: 'Content', view: 'content', icon: BookOpen });
-        list.push({ name: 'Reports', view: 'reports', icon: FileText });
         list.push({ name: 'Analytics', view: 'analytics', icon: BarChart3 });
         list.push({ name: 'System Settings', view: 'system_settings', icon: Settings });
         list.push({ name: 'Audit Logs', view: 'logbook', icon: ShieldCheck });

@@ -237,6 +237,12 @@ export function registerStudentRoutes(app: express.Express) {
     }
 
     await dbStore.addStudent(newStudent);
+    // Issue: bulk diagnostic generation ("not authorized for Class N")
+    // traced back to no ClassGroup document ever being created for
+    // live-registered classes — only the seed data had one. Ensure it
+    // exists now so class-tabs, bulk-diagnostic authorization, etc. all
+    // work for this student's class going forward.
+    await dbStore.ensureClassExists(schoolId, trimmedClassGroup, trimmedSection, actingUser.id);
     // Track in-memory so bulk operations detect intra-batch duplicates too
     existingAadhars.add(rawAadhar);
     return { student: newStudent };

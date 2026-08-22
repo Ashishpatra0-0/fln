@@ -1404,6 +1404,48 @@ export class DBStore {
     return student;
   }
 
+  // Only the original seed data ever populated the `classes` collection —
+  // registering a student (single or bulk-import) creates a Student record
+  // tagged with a classGroup/section, but nothing was ever creating the
+  // matching ClassGroup document those classGroup/section strings imply.
+  // Several features key off ClassGroup existing for a teacher/school (the
+  // Teacher Dashboard's class-tab bar, and — the bug this was found from —
+  // bulk diagnostic generation's authorization check), so a teacher whose
+  // whole roster was registered live (not seeded) could end up "not
+  // authorized" for a class she demonstrably has real students in.
+  // Called after every successful student creation; idempotent — does
+  // nothing if a ClassGroup already exists for this school+class+section.
+  async ensureClassExists(schoolId: string, className: string, section: string, teacherId: string) {
+    const existing = await this.getClasses();
+    if (existing.some(c => c.schoolId === schoolId && c.className === className && c.section === section)) {
+      return;
+    }
+    const newClass: ClassGroup = {
+      id: 'c_' + schoolId + '_' + className.replace(/\s+/g, '') + '_' + section,
+      schoolId,
+      className,
+      section,
+      teacherId,
+    };
+    if (this.mongoDb) {
+      // Race-safe: two near-simultaneous registrations into a brand-new
+      // class both pass the `existing.some(...)` check above before either
+      // has inserted. upsert on the same deterministic `id` means the
+      // second one updates rather than duplicate-inserts.
+      await this.mongoDb.collection('classes').updateOne(
+        { id: newClass.id },
+        { $setOnInsert: newClass },
+        { upsert: true }
+      );
+    }
+    if (this.data) {
+      if (!this.data.classes.some(c => c.id === newClass.id)) {
+        this.data.classes.push(newClass);
+      }
+      if (!this.mongoDb) await this.save();
+    }
+  }
+
   async updateStudent(studentId: string, updates: Partial<Student>) {
     await this.mongoDb!.collection('students').updateOne({ id: studentId }, { $set: updates });
     const s = await this.mongoDb!.collection<Student>('students').findOne({ id: studentId });
