@@ -510,6 +510,19 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
         return cls ? `${dateKey}__${cls.className}::${cls.section}` : `solo:${p.id}`;
     };
 
+    // A student can have more than one pending paper in the same class+date
+    // group (uploaded separately, different paperIds) — list their name once
+    // with a "(N)" count suffix instead of repeating it. The underlying
+    // papers array is untouched, so click-to-grade Previous/Next navigation
+    // still reaches every paper.
+    const formatGroupNames = (papers: any[]): string => {
+        const counts = new Map<string, number>();
+        for (const p of papers) counts.set(p.studentName, (counts.get(p.studentName) || 0) + 1);
+        return Array.from(counts.entries())
+            .map(([name, count]) => count > 1 ? `${name} (${count})` : name)
+            .join(', ');
+    };
+
     // Due Today / Overdue grouping. /api/practice/due only ever returns items
     // with nextDueDate <= now, so there is no future-due date to distinguish —
     // every item is already "due today or overdue," which is why this merges
@@ -1144,7 +1157,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                                             className="w-full px-4 py-2 border border-zinc-100 rounded-lg bg-slate-50 hover:bg-zinc-100 hover:border-zinc-300 transition-colors text-left flex items-center justify-between gap-2"
                                                         >
                                                             <span className="font-medium text-sm text-zinc-800">
-                                                                {batch.papers.map(p => p.studentName).join(', ')}
+                                                                {formatGroupNames(batch.papers)}
                                                             </span>
                                                             {batch.classLabel && (
                                                                 <span className="flex-shrink-0 rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">

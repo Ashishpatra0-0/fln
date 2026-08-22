@@ -981,6 +981,10 @@ async function startServer() {
       }
     }
 
+    // Captured before updateStudent below overwrites currentLevel in the DB —
+    // reconcilePracticeSchedulesWithDiagnostic needs the pre-diagnostic value.
+    const previousCurrentLevel = student.currentLevel;
+
     // Update Student placing levels
     const levelHistory = [...student.levelHistory, {
       level: recommendedLevel,
@@ -1032,6 +1036,17 @@ async function startServer() {
     };
 
     await dbStore.addEvaluationReport(report);
+
+    await ensurePracticeSchedulesForWeakCompetencies(student.id, student.name, user.id, conceptMastery);
+
+    await reconcilePracticeSchedulesWithDiagnostic(
+      student.id,
+      student.name,
+      user.id,
+      conceptMastery,
+      previousCurrentLevel,
+      recommendedLevel
+    );
 
     await dbStore.addLog({
       id: 'log_' + Date.now(),
@@ -4279,6 +4294,118 @@ async function startServer() {
     }
 
     return { intervalDays: Math.max(1, Math.floor(currentIntervalDays / 2)), levelId: currentLevelId, subIdx: currentSubIdx, resolved: false };
+  }
+
+  // Ensures a PracticeSchedule row exists for every competency this
+  // diagnostic flagged 'Needs Practice' — without this, a competency that's
+  // never been weak before (a brand-new student's first diagnostic, or an
+  // existing student's newly-weak competency) has NO schedule at all, so it
+  // silently never appears in Due Today until a teacher happens to
+  // generate/grade a paper for it. Called before
+  // reconcilePracticeSchedulesWithDiagnostic, not merged into it: this only
+  // ever creates missing rows (via the same single creation point,
+  // getOrInitPracticeSchedule, so it's a no-op for a competency that already
+  // has one); reconcile's job is comparing old vs. new state for rows that
+  // already exist, which doesn't apply here.
+  async function ensurePracticeSchedulesForWeakCompetencies(
+    studentId: string,
+    studentName: string,
+    teacherId: string,
+    conceptMastery: { [topic: string]: 'Strong' | 'Needs Practice' | 'Satisfactory' }
+  ): Promise<void> {
+    const seen = new Set<string>();
+    for (const rawCompetency of Object.keys(conceptMastery)) {
+      if (conceptMastery[rawCompetency] !== 'Needs Practice') continue;
+      const competency = normalizeCompetencyName(rawCompetency);
+      if (seen.has(competency)) continue;
+      seen.add(competency);
+      try {
+        await getOrInitPracticeSchedule(studentId, studentName, teacherId, competency);
+      } catch {
+        // Doesn't map to any of the 9 known strands (e.g. a free-text
+        // topics_to_focus string from the AI pipeline that isn't a
+        // recognized competency name) — nothing real to schedule, skip it.
+      }
+    }
+  }
+
+  // Reconciles existing PracticeSchedule rows against a new formal diagnostic
+  // re-assessment. Called once, right after the diagnostic's EvaluationReport
+  // is persisted (POST /api/students/:id/diagnostic/submit only — the ICR
+  // bulk-scan and worksheet-submit routes also create EvaluationReports but
+  // are NOT formal re-assessments in this sense, and are not hooked here).
+  // Never creates schedules — that stays getOrInitPracticeSchedule's job at
+  // generation time; this only updates ones that already exist.
+  //
+  // previousCurrentLevel/newCurrentLevel are student.currentLevel before/after
+  // this diagnostic, on the 93-entry FLN_LEVELS_LIST scale — NOT the same
+  // numbering as PracticeSchedule.currentLevelId (the 59-id levels_main.html
+  // scale used by mapCompetencyToLevel below). The two scales are only ever
+  // compared against each other (via class band), never against currentLevelId.
+  async function reconcilePracticeSchedulesWithDiagnostic(
+    studentId: string,
+    studentName: string,
+    teacherId: string,
+    conceptMastery: { [topic: string]: 'Strong' | 'Needs Practice' | 'Satisfactory' },
+    previousCurrentLevel: number,
+    newCurrentLevel: number
+  ): Promise<void> {
+    const schedules = await dbStore.getPracticeSchedules();
+    const studentSchedules = schedules.filter(s => s.studentId === studentId);
+    if (studentSchedules.length === 0) return;
+
+    // The 93-level scale is organized in ~10-level "class bands" (Preschool
+    // 1/2/3, Class 1/2/3/4) — crossing a band means the student's overall
+    // placement moved into meaningfully different grade-level material, not
+    // just a small nudge within the same band.
+    const previousBand = Math.floor((previousCurrentLevel - 1) / 10);
+    const newBand = Math.floor((newCurrentLevel - 1) / 10);
+    const crossedClassBand = previousBand !== newBand;
+
+    for (const schedule of studentSchedules) {
+      const competency = normalizeCompetencyName(schedule.competency);
+      const status = conceptMastery[competency];
+      if (status === undefined) continue; // diagnostic gave no signal on this strand
+
+      if (status !== 'Needs Practice') {
+        // Now Strong/Satisfactory — resolved regardless of current position.
+        await dbStore.updatePracticeSchedule(schedule.id, { resolved: true });
+        continue;
+      }
+
+      // Still 'Needs Practice'.
+      if (schedule.resolved) {
+        // Previously resolved, but this new (more authoritative) diagnostic
+        // re-flags it weak — un-resolve and restart at the easiest level,
+        // same as a fresh weak competency.
+        const easiestLevelId = mapCompetencyToLevel(competency);
+        if (easiestLevelId != null) {
+          await dbStore.updatePracticeSchedule(schedule.id, {
+            resolved: false,
+            currentLevelId: easiestLevelId,
+            currentSubIdx: 0,
+            intervalDays: 1
+          });
+        }
+        continue;
+      }
+
+      if (crossedClassBand) {
+        // Still weak, but overall placement moved into different grade-level
+        // material — discard the old position, restart fresh.
+        const easiestLevelId = mapCompetencyToLevel(competency);
+        if (easiestLevelId != null) {
+          await dbStore.updatePracticeSchedule(schedule.id, {
+            currentLevelId: easiestLevelId,
+            currentSubIdx: 0,
+            intervalDays: 1,
+            resolved: false
+          });
+        }
+      }
+      // else: still weak, same class band — leave currentLevelId/currentSubIdx/
+      // intervalDays exactly as-is; no reason to discard existing progress.
+    }
   }
 
   // Single creation point for a competency's PracticeSchedule — used both at

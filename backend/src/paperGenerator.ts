@@ -456,6 +456,29 @@ function inferAnswerType(item: any): 'text' | 'number' | 'choice' | 'visual-conf
   return 'text';
 }
 
+// circle-choice/mcq answers carry {optionIndex, ...} plus a friendly label
+// field (icon name, display value, option text) alongside the index used to
+// grade OMR position — show that label instead of dumping the raw object.
+// Falls back to "Option N" for the rare shape that carries only an index
+// (e.g. some yes/no-style circle questions), and to JSON.stringify only for
+// truly multi-value shapes (fill-blank's {a,b,sum} etc., or arrays like
+// ordering's sorted-number-list answers) where there is no single "the
+// answer" to extract.
+function formatCorrectAnswer(item: any): string {
+  const val = item.correctAnswer;
+  if (val == null) return '';
+  if (typeof val !== 'object' || Array.isArray(val)) {
+    return typeof val === 'object' ? JSON.stringify(val) : String(val);
+  }
+  if ('icon' in val) return String(val.icon);
+  if ('value' in val) return String(val.value);
+  if ('text' in val) return String(val.text);
+  if ('object' in val) return String(val.object);
+  if ('optionIndex' in val) return `Option ${val.optionIndex + 1}`;
+  if ('position' in val) return `Position ${val.position}`;
+  return JSON.stringify(val);
+}
+
 // Puppeteer's headerTemplate/footerTemplate render identically on every
 // page and there is no reliable way to distinguish page 1 from later pages
 // from within a single shared template — confirmed by direct testing:
@@ -617,9 +640,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;margin:0;background:#fff;color:var(
     const questions: Question[] = [];
     if (data.answerKey && Array.isArray(data.answerKey.items)) {
       data.answerKey.items.forEach((item: any, idx: number) => {
-        const answerStr = item.correctAnswer != null
-          ? (typeof item.correctAnswer === 'object' ? JSON.stringify(item.correctAnswer) : String(item.correctAnswer))
-          : '';
+        const answerStr = formatCorrectAnswer(item);
         questions.push({
           question_id: `${studentId}_${item.questionId}`,
           question: item.coordHint || `Question ${idx + 1}: ${item.sectionName || 'Micro-Practice'}`,
@@ -726,9 +747,7 @@ export async function generateMultiCompetencyMicroPaper({
       const questions: Question[] = [];
       if (data.answerKey && Array.isArray(data.answerKey.items)) {
         data.answerKey.items.forEach((item: any, idx: number) => {
-          const answerStr = item.correctAnswer != null
-            ? (typeof item.correctAnswer === 'object' ? JSON.stringify(item.correctAnswer) : String(item.correctAnswer))
-            : '';
+          const answerStr = formatCorrectAnswer(item);
           questions.push({
             question_id: `${studentId}_part${i + 1}_${item.questionId}`,
             question: item.coordHint || `Question ${idx + 1}: ${item.sectionName || competency}`,
