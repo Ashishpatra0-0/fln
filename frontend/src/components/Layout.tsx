@@ -4,8 +4,9 @@ import { apiFetch } from '../services/apiClient';
 import {
   Menu, X, Search, Bell, Sun, Moon, LogOut, ChevronRight, ChevronLeft, ChevronDown,
   LayoutDashboard, BookOpen, UserCheck, Calendar, ShieldCheck, HelpCircle, Settings, Users,
-  School, GraduationCap, MapPin, BarChart3, FileText, ClipboardList, ShieldAlert, KeyRound, Clock, Database, Repeat
+  School, GraduationCap, MapPin, BarChart3, FileText, ClipboardList, ShieldAlert, KeyRound, Clock, Database, Repeat, Home
 } from 'lucide-react';
+import { LanguageSwitcher } from './LanguageSwitcher';
 
 interface NavigationItem {
   name: string;
@@ -24,6 +25,7 @@ interface LayoutProps {
   onMarkNotificationRead: (id: string) => void;
   onClearNotifications: () => void;
   onLogout: () => void;
+  onNavigateHome: () => void;
   isDark: boolean;
   onThemeToggle: () => void;
   children: React.ReactNode;
@@ -38,6 +40,7 @@ export const Layout: React.FC<LayoutProps> = ({
   onMarkNotificationRead,
   onClearNotifications,
   onLogout,
+  onNavigateHome,
   isDark,
   onThemeToggle,
   children
@@ -140,8 +143,7 @@ export const Layout: React.FC<LayoutProps> = ({
           icon: GraduationCap,
           subItems: [
             { name: 'Student List', view: 'student_list' },
-            { name: 'Student Profile', view: 'student_profile' },
-            { name: 'Performance', view: 'performance' }
+            { name: 'Student Profile', view: 'student_profile' }
           ]
         });
         list.push({ name: 'Worksheets', view: 'worksheets', icon: ClipboardList });
@@ -273,18 +275,7 @@ export const Layout: React.FC<LayoutProps> = ({
             <button onClick={() => adjustFontSize(10)} className="hover:text-white transition px-1.5 py-0.5 rounded border border-gray-700 hover:border-gray-500" title="Increase font size">A+</button>
           </div>
           <span className="text-gray-700 dark:text-gray-500">|</span>
-          <select
-            defaultValue="en"
-            onChange={(e) => {
-              if (e.target.value === 'hi') alert("हिन्दी भाषा में बदलें");
-              if (e.target.value === 'pa') alert("ਪੰਜਾਬੀ ਭਾਸ਼ਾ ਵਿੱਚ ਬਦਲੋ");
-            }}
-            className="bg-gray-800 text-gray-300 text-[10px] md:text-xs font-bold border border-gray-700 rounded px-2 py-1 outline-none hover:border-gray-500 cursor-pointer"
-          >
-            <option value="en">English</option>
-            <option value="pa">ਪੰਜਾਬੀ</option>
-            <option value="hi">हिन्दी</option>
-          </select>
+          <LanguageSwitcher variant="dark" />
         </div>
       </div>
 
@@ -336,6 +327,10 @@ export const Layout: React.FC<LayoutProps> = ({
 
         {/* Topbar Right Section */}
         <div className="flex items-center gap-4">
+          {/* Language Switcher — dashboard chrome labels remain English for now;
+              the landing page hero/stats/vision copy is already routed through t(). */}
+          <LanguageSwitcher />
+
           {/* Dynamic Database Storage Status */}
           <button
             onClick={() => setShowDbModal(true)}
@@ -418,6 +413,13 @@ export const Layout: React.FC<LayoutProps> = ({
                 {currentUser.role.replace('_', ' ')}
               </span>
             </div>
+            <button
+              onClick={onNavigateHome}
+              className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-indigo-500 transition dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-indigo-400"
+              title="Home"
+            >
+              <Home className="h-4.5 w-4.5" />
+            </button>
             <button
               onClick={onLogout}
               className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-red-500 transition dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-red-400"

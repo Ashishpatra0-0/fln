@@ -98,6 +98,7 @@ export default function App() {
     const handleUnauthorized = () => {
       setToken(null);
       setCurrentUser(null);
+      setActivePanel('workspace');
       localStorage.removeItem('fln_token');
       setCurrentView('home');
       navigate('/');
@@ -111,6 +112,7 @@ export default function App() {
     setToken(newToken);
     localStorage.setItem('fln_token', newToken);
     setCurrentUser(user);
+    setActivePanel('workspace');
     setCurrentView('dashboard');
     navigate('/');
   };
@@ -127,9 +129,15 @@ export default function App() {
 
   const handleClearNotifications = () => setAnnouncements([]);
 
+  const handleNavigateHome = () => {
+    setCurrentView('home');
+    navigate('/');
+  };
+
   const handleLogout = () => {
     setToken(null);
     setCurrentUser(null);
+    setActivePanel('workspace');
     localStorage.removeItem('fln_token');
     setCurrentView('home');
     navigate('/');
@@ -165,7 +173,12 @@ export default function App() {
         path="*"
         element={
           <div className="flex min-h-screen flex-col font-sans bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 antialiased">
-            {currentView === 'home' && <LandingView onNavigateToLogin={() => setCurrentView('login')} />}
+            {currentView === 'home' && (
+              <LandingView
+                isLoggedIn={!!(token && currentUser)}
+                onNavigateToLogin={() => setCurrentView(token && currentUser ? 'dashboard' : 'login')}
+              />
+            )}
             {currentView === 'login' && <LoginView onLoginSuccess={handleLoginSuccess} onBackToHome={() => setCurrentView('home')} />}
 
             {currentView === 'dashboard' && currentUser && token && (
@@ -178,6 +191,7 @@ export default function App() {
                 onMarkNotificationRead={handleMarkNotificationRead}
                 onClearNotifications={handleClearNotifications}
                 onLogout={handleLogout}
+                onNavigateHome={handleNavigateHome}
                 isDark={isDark}
                 onThemeToggle={() => setIsDark(!isDark)}
               >
