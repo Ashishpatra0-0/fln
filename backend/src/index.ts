@@ -65,10 +65,8 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 // execFileSync throws on non-zero exit before we can read stdout normally.
 // Our Python scripts print a JSON error line to stdout before exiting
 // non-zero on failure, so pull the real message out of e.stdout instead of
-// using execFileSync's generic "Command failed: ..." wrapper text. Still
-// used by /api/icr/rasterize-pdf below (unique to this branch, no
-// routes/*.ts equivalent), even though the old inline /api/icr/filter that
-// used to be its other caller is gone now (routes/evaluation.ts owns that).
+// using execFileSync's generic "Command failed: ..." wrapper text. Used by
+// /api/icr/rasterize-pdf below, which has no routes/*.ts equivalent.
 function extractPythonScriptError(e: any, fallbackPrefix: string): string {
   const stdout: string = typeof e?.stdout === 'string' ? e.stdout : (e?.stdout ? String(e.stdout) : '');
   const lastLine = stdout.trim().split('\n').filter(Boolean).pop();
@@ -267,9 +265,6 @@ async function startServer() {
   // Shared logic for weak-competency lookup — used by both
   // GET /api/students/:id/weak-competencies (single-student UI lookup) and
   // POST /api/practice/bulk-generate (class-wide generation, below).
-  // normalizeCompetencyName now lives in services/practiceScheduleService.ts
-  // (imported above) so routes/students.ts's diagnostic/submit handler can
-  // use it too.
   async function getWeakCompetenciesForStudent(studentId: string) {
     const reports = await dbStore.getEvaluationReports();
     const studentReports = reports

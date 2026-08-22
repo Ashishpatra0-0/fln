@@ -2,10 +2,8 @@ import { dbStore, PracticeSchedule } from '../db';
 import { mapCompetencyToLevel, KNOWN_COMPETENCIES } from '../flnLevels';
 import { randomUUID } from 'crypto';
 
-// Extracted out of index.ts's startServer() closure so it's reachable from
-// route modules other than index.ts itself (e.g. routes/students.ts's
-// diagnostic/submit handler) — these are plain, closure-free functions (only
-// module-level imports + dbStore), so the move is behavior-preserving.
+// Shared practice-schedule creation and reconciliation logic, used by both
+// index.ts and routes/students.ts.
 
 // Normalizes a raw conceptMastery topic string against the 9 known
 // competency names. Exact match (case-insensitive) first; otherwise, if the

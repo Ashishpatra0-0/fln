@@ -337,8 +337,8 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
         setGeneratePaperError(null);
         try {
             // The server resolves levelId/subIdx from the student's PracticeSchedule
-            // for this competency (their real current position, advancing on good
-            // scores) — it's no longer looked up here and pinned to subIdx 0.
+            // for this competency — their real current position, advancing on good
+            // scores, not a fixed subIdx 0.
             const res = await apiFetch(`/api/students/${selectedStudentId}/micro-practice/generate-pdf`, {
                 method: 'POST',
                 headers: {
@@ -434,7 +434,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
     // Moves to the sibling paper at `offset` positions away within the
     // currently-active batch (e.g. -1 for Previous, +1 for Next). No-ops at
     // either end rather than wrapping. Does not save any in-progress typed
-    // answers on the paper being left — matches today's behavior, where
+    // answers on the paper being left — matches the existing behavior, where
     // "Save & Grade Later" is the only explicit way to persist a draft.
     const goToBatchSibling = (offset: number) => {
         if (!activeGroupKey || !identifiedPaper) return;
@@ -473,9 +473,9 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
 
     // Classes derived from the already-fetched student list's own
     // classGroup+section pairs — not from User/ClassGroup, which aren't a
-    // reliable signal for "this teacher's classes" (see investigation:
-    // ClassGroup.teacherId is inconsistently populated, and /api/students
-    // scopes teachers by schoolId, not teacherId).
+    // reliable signal for "this teacher's classes": ClassGroup.teacherId is
+    // inconsistently populated, and /api/students scopes teachers by
+    // schoolId, not teacherId.
     const classOptions = students.reduce((acc: { key: string; className: string; section: string }[], s) => {
         const className = s.classGroup || 'Unknown';
         const section = s.section || '';
@@ -506,8 +506,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
     // same day belong together regardless of which upload action created
     // them. Falls back to a per-paper unique key when the student's class
     // can't be resolved, so such a paper renders standalone instead of being
-    // merged into a false "unknown class" bucket (same precedent as the old
-    // uploadBatchId-or-id fallback).
+    // merged into a false "unknown class" bucket.
     const getGroupKeyForPaper = (p: any): string => {
         const cls = getStudentClass(p.studentId);
         const dateKey = new Date(p.uploadedAt).toLocaleDateString();
