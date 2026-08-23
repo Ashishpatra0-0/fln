@@ -614,13 +614,13 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                     <div className="flex gap-2">
                         <button
                             onClick={() => (generateMode === 'none' ? openGeneratePanel() : closeGeneratePanel())}
-                            className="bg-indigo-700 text-white font-medium text-xs py-1.5 px-3 rounded-md hover:bg-indigo-600"
+                            className="bg-indigo-700 text-white font-mono font-medium text-xs py-1.5 px-3 rounded-md hover:bg-indigo-600"
                         >
                             {generateMode === 'none' ? '+ Generate Practice Paper' : 'Close'}
                         </button>
                         <button
                             onClick={() => { setShowUploadPaper(!showUploadPaper); setIdentifiedPaper(null); setActiveGroupKey(null); }}
-                            className="bg-emerald-700 text-white font-medium text-xs py-1.5 px-3 rounded-md hover:bg-emerald-600 flex items-center gap-1.5"
+                            className="bg-emerald-700 text-white font-mono font-medium text-xs py-1.5 px-3 rounded-md hover:bg-emerald-600 flex items-center gap-1.5"
                         >
                             {showUploadPaper ? 'Close' : <><Upload className="h-4 w-4" /> Upload Completed Paper</>}
                         </button>
@@ -680,7 +680,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                         Generate a Printable Micro-Practice Paper
                     </h3>
                     <div>
-                        <label className="block text-xs font-medium text-zinc-700 uppercase tracking-wider mb-1.5">
+                        <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1.5">
                             Select Class
                         </label>
                         <div className="flex flex-wrap gap-2">
@@ -712,18 +712,18 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                     <div className="grid grid-cols-2 gap-3">
                         <button
                             onClick={chooseIndividualMode}
-                            className="flex flex-col items-center text-center bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 rounded-lg p-4"
+                            className="flex flex-col items-center text-center bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 rounded-lg p-4"
                         >
                             <User className="w-6 h-6 text-zinc-500 mb-2" />
-                            <div className="font-medium text-sm text-zinc-800">Individual Student</div>
+                            <div className="font-medium text-sm text-zinc-800 dark:text-zinc-100">Individual Student</div>
                             <div className="text-xs text-zinc-500 mt-0.5">Generate one paper for a single student</div>
                         </button>
                         <button
                             onClick={chooseBulkMode}
-                            className="flex flex-col items-center text-center bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 rounded-lg p-4"
+                            className="flex flex-col items-center text-center bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 rounded-lg p-4"
                         >
                             <Users className="w-6 h-6 text-zinc-500 mb-2" />
-                            <div className="font-medium text-sm text-zinc-800">Bulk (Whole Class)</div>
+                            <div className="font-medium text-sm text-zinc-800 dark:text-zinc-100">Bulk (Whole Class)</div>
                             <div className="text-xs text-zinc-500 mt-0.5">Generate personalized papers for multiple students at once</div>
                         </button>
                     </div>
@@ -753,7 +753,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                 </div>
                             )}
                             <div>
-                                <label className="block text-xs font-medium text-zinc-700 uppercase tracking-wider mb-1">
+                                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
                                     Student
                                 </label>
                                 <select
@@ -764,7 +764,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                         setCompetency('');
                                         fetchWeakCompetencies(studentId);
                                     }}
-                                    className="w-full text-sm border border-zinc-200 rounded-lg p-2.5 bg-zinc-50"
+                                    className="w-full text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg p-2.5 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
                                 >
                                     <option value="">Select a student...</option>
                                     {filteredStudents.map(s => (
@@ -773,13 +773,13 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-xs font-medium text-zinc-700 uppercase tracking-wider mb-1">
+                                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
                                     Competency to Practice
                                 </label>
                                 <select
                                     value={competency}
                                     onChange={(e) => setCompetency(e.target.value)}
-                                    className="w-full text-sm border border-zinc-200 rounded-lg p-2.5 bg-zinc-50"
+                                    className="w-full text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg p-2.5 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
                                 >
                                     <option value="">Select a competency...</option>
                                     {(studentCompetencyOptions.length > 0 ? studentCompetencyOptions : ALL_COMPETENCIES).map(c => (
@@ -788,7 +788,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-xs font-medium text-zinc-700 uppercase tracking-wider mb-1">
+                                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
                                     Number of Questions
                                 </label>
                                 <input
@@ -796,11 +796,11 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                     min={1}
                                     value={paperQuestionCount}
                                     onChange={(e) => setPaperQuestionCount(Math.max(1, Number(e.target.value) || 1))}
-                                    className="w-full text-sm border border-zinc-200 rounded-lg p-2.5 bg-zinc-50"
+                                    className="w-full text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg p-2.5 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
                                 />
                             </div>
                             {generatePaperError && (
-                                <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">{generatePaperError}</div>
+                                <div className="text-sm text-red-600 dark:text-red-300 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-3">{generatePaperError}</div>
                             )}
                             <button
                                 type="submit"
@@ -864,16 +864,16 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                             <div className="grid grid-cols-2 gap-3">
                                 <button
                                     onClick={chooseBulkManual}
-                                    className="flex flex-col items-center text-center bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 rounded-lg p-4"
+                                    className="flex flex-col items-center text-center bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 rounded-lg p-4"
                                 >
-                                    <div className="font-medium text-sm text-zinc-800">Select Students Manually</div>
+                                    <div className="font-medium text-sm text-zinc-800 dark:text-zinc-100">Select Students Manually</div>
                                     <div className="text-xs text-zinc-500 mt-0.5">Choose specific students from your roster</div>
                                 </button>
                                 <button
                                     onClick={chooseBulkEntireClass}
-                                    className="flex flex-col items-center text-center bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 rounded-lg p-4"
+                                    className="flex flex-col items-center text-center bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 rounded-lg p-4"
                                 >
-                                    <div className="font-medium text-sm text-zinc-800">Generate for Entire Class</div>
+                                    <div className="font-medium text-sm text-zinc-800 dark:text-zinc-100">Generate for Entire Class</div>
                                     <div className="text-xs text-zinc-500 mt-0.5">One click — includes every student in your roster</div>
                                 </button>
                             </div>
@@ -901,15 +901,15 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                 </div>
                             )}
                             <div>
-                                <label className="block text-xs font-medium text-zinc-700 uppercase tracking-wider mb-1">
+                                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
                                     Students
                                 </label>
-                                <div className="border border-zinc-200 rounded-lg max-h-64 overflow-y-auto divide-y divide-zinc-100">
+                                <div className="border border-zinc-200 dark:border-zinc-700 rounded-lg max-h-64 overflow-y-auto divide-y divide-zinc-100 dark:divide-zinc-700">
                                     {filteredStudents.length === 0 ? (
                                         <p className="text-sm text-zinc-400 p-3">{selectedClassKey ? 'No students in this class.' : 'No students found.'}</p>
                                     ) : (
                                         filteredStudents.map(s => (
-                                            <label key={s.id} className="flex items-center gap-2 text-sm p-2.5 cursor-pointer hover:bg-zinc-50">
+                                            <label key={s.id} className="flex items-center gap-2 text-sm p-2.5 cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800">
                                                 <input
                                                     type="checkbox"
                                                     checked={bulkSelectedStudentIds.includes(s.id)}
@@ -923,7 +923,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                 <p className="text-xs text-zinc-500 mt-1">{bulkSelectedStudentIds.length} selected</p>
                             </div>
                             <div>
-                                <label className="block text-xs font-medium text-zinc-700 uppercase tracking-wider mb-1">
+                                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
                                     Questions per Competency
                                 </label>
                                 <input
@@ -931,11 +931,11 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                     min={1}
                                     value={bulkQuestionsPerCompetency}
                                     onChange={(e) => setBulkQuestionsPerCompetency(Math.max(1, Number(e.target.value) || 1))}
-                                    className="w-full text-sm border border-zinc-200 rounded-lg p-2.5 bg-zinc-50"
+                                    className="w-full text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg p-2.5 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
                                 />
                             </div>
                             {bulkError && (
-                                <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">{bulkError}</div>
+                                <div className="text-sm text-red-600 dark:text-red-300 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-3">{bulkError}</div>
                             )}
                             <button
                                 type="submit"
@@ -973,7 +973,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                 This will generate personalized papers for all <b>{filteredStudents.length}</b> student{filteredStudents.length !== 1 ? 's' : ''} {selectedClassKey ? `in ${selectedClassLabel?.className}${selectedClassLabel?.section ? ` - ${selectedClassLabel.section}` : ''}` : 'in your roster'}. Students without evaluation data yet will be automatically skipped.
                             </p>
                             <div>
-                                <label className="block text-xs font-medium text-zinc-700 uppercase tracking-wider mb-1">
+                                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
                                     Questions per Competency
                                 </label>
                                 <input
@@ -981,11 +981,11 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                     min={1}
                                     value={bulkQuestionsPerCompetency}
                                     onChange={(e) => setBulkQuestionsPerCompetency(Math.max(1, Number(e.target.value) || 1))}
-                                    className="w-full text-sm border border-zinc-200 rounded-lg p-2.5 bg-zinc-50"
+                                    className="w-full text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg p-2.5 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
                                 />
                             </div>
                             {bulkError && (
-                                <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">{bulkError}</div>
+                                <div className="text-sm text-red-600 dark:text-red-300 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-3">{bulkError}</div>
                             )}
                             <button
                                 onClick={() => handleBulkGenerate(filteredStudents.map(s => s.id))}
@@ -1012,16 +1012,16 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                     ? `This will generate one paper for ${dueBulkGroup.students[0].studentName}, scoped to only the competency(ies) actually due — not their full weak-competency list.`
                                     : `This will generate papers for ${dueBulkGroup.students.length} students in ${dueBulkGroup.targetLabel}, scoped to only the competency(ies) actually due — not their full weak-competency list.`}
                             </p>
-                            <div className="border border-zinc-200 rounded-lg max-h-64 overflow-y-auto divide-y divide-zinc-100">
+                            <div className="border border-zinc-200 dark:border-zinc-700 rounded-lg max-h-64 overflow-y-auto divide-y divide-zinc-100 dark:divide-zinc-700">
                                 {dueBulkGroup.students.map(s => (
                                     <div key={s.studentId} className="flex items-center justify-between text-sm p-2.5">
-                                        <span className="text-zinc-800">{s.studentName}</span>
+                                        <span className="text-zinc-800 dark:text-zinc-100">{s.studentName}</span>
                                         <span className="text-xs text-zinc-500">{s.competencies.join(', ')}</span>
                                     </div>
                                 ))}
                             </div>
                             <div>
-                                <label className="block text-xs font-medium text-zinc-700 uppercase tracking-wider mb-1">
+                                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
                                     Questions per Competency
                                 </label>
                                 <input
@@ -1029,11 +1029,11 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                     min={1}
                                     value={bulkQuestionsPerCompetency}
                                     onChange={(e) => setBulkQuestionsPerCompetency(Math.max(1, Number(e.target.value) || 1))}
-                                    className="w-full text-sm border border-zinc-200 rounded-lg p-2.5 bg-zinc-50"
+                                    className="w-full text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg p-2.5 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
                                 />
                             </div>
                             {bulkError && (
-                                <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">{bulkError}</div>
+                                <div className="text-sm text-red-600 dark:text-red-300 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-3">{bulkError}</div>
                             )}
                             <button
                                 onClick={() => handleBulkGenerate(
@@ -1099,7 +1099,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                         )}
                                     </div>
                                 </div>
-                                <div className="border border-zinc-200 rounded-lg overflow-hidden overflow-x-auto">
+                                <div className="border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden overflow-x-auto">
                                     <table className="w-full text-sm">
                                         <thead className="bg-zinc-50 dark:bg-zinc-800">
                                             <tr>
@@ -1113,7 +1113,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                                     <td className="p-2.5 text-zinc-800 dark:text-zinc-100">{r.studentName || r.studentId}</td>
                                                     <td className="p-2.5">
                                                         {r.skipped ? (
-                                                            <span className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded border border-amber-200">
+                                                            <span className="text-xs text-amber-600 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 px-2 py-1 rounded border border-amber-200 dark:border-amber-800">
                                                                 Skipped — {r.reason}
                                                             </span>
                                                         ) : (
@@ -1214,9 +1214,9 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                                         <button
                                                             key={batch.groupKey}
                                                             onClick={() => { setActiveGroupKey(batch.groupKey); openPendingPaper(batch.papers[0]); }}
-                                                            className="w-full px-4 py-2 border border-zinc-100 rounded-lg bg-slate-50 hover:bg-zinc-100 hover:border-zinc-300 transition-colors text-left flex items-center justify-between gap-2"
+                                                            className="w-full px-4 py-2 border border-zinc-100 dark:border-zinc-700 rounded-lg bg-slate-50 dark:bg-slate-800 hover:bg-zinc-100 dark:hover:bg-slate-700 hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors text-left flex items-center justify-between gap-2"
                                                         >
-                                                            <span className="font-medium text-sm text-zinc-800">
+                                                            <span className="font-medium text-sm text-zinc-800 dark:text-zinc-100">
                                                                 {formatGroupNames(batch.papers)}
                                                             </span>
                                                             {batch.classLabel && (
@@ -1279,17 +1279,17 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                                     group.label,
                                                     group.students.map(sg => ({ studentId: sg.studentId, studentName: sg.studentName, competencies: sg.competencies }))
                                                 )}
-                                                className="w-full px-4 py-3 border border-zinc-100 rounded-lg bg-slate-50 hover:bg-zinc-100 hover:border-zinc-300 transition-colors text-left space-y-1"
+                                                className="w-full px-4 py-3 border border-zinc-100 dark:border-zinc-700 rounded-lg bg-slate-50 dark:bg-slate-800 hover:bg-zinc-100 dark:hover:bg-slate-700 hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors text-left space-y-1"
                                             >
                                                 {group.students.map(sg => (
                                                     <div key={sg.studentId} className="flex items-center justify-between gap-2">
                                                         <span>
-                                                            <span className="font-medium text-sm text-zinc-800">{sg.studentName}</span>
+                                                            <span className="font-medium text-sm text-zinc-800 dark:text-zinc-100">{sg.studentName}</span>
                                                             <span className="text-xs text-zinc-600 ml-2">-{sg.competencies.join(', ')}</span>
                                                         </span>
                                                     </div>
                                                 ))}
-                                                <span className="block pt-1.5 mt-1 border-t border-zinc-200 text-xs font-bold text-indigo-700">
+                                                <span className="block pt-1.5 mt-1 border-t border-zinc-200 dark:border-zinc-700 text-xs font-bold text-indigo-700 dark:text-indigo-400">
                                                     Generate ({group.students.length} student{group.students.length !== 1 ? 's' : ''})
                                                 </span>
                                             </button>
@@ -1297,13 +1297,13 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                                 <button
                                                     type="button"
                                                     onClick={() => setExpandedIndividualDueClass(isExpandedForIndividual ? null : group.key)}
-                                                    className="mt-1.5 text-[11px] font-medium text-indigo-600 hover:underline"
+                                                    className="mt-1.5 pl-4 text-[11px] font-medium text-indigo-600 hover:text-indigo-800 transition-colors"
                                                 >
                                                     {isExpandedForIndividual ? 'Hide individual options' : 'Generate Individually'}
                                                 </button>
                                             )}
                                             {group.students.length > 1 && isExpandedForIndividual && (
-                                                <div className="mt-2 space-y-1.5 pl-2 border-l-2 border-zinc-100">
+                                                <div className="mt-2 space-y-1.5 pl-2 border-l-2 border-zinc-100 dark:border-zinc-700">
                                                     {group.students.map(sg => (
                                                         <button
                                                             key={sg.studentId}
@@ -1311,10 +1311,10 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                                                 sg.studentName,
                                                                 [{ studentId: sg.studentId, studentName: sg.studentName, competencies: sg.competencies }]
                                                             )}
-                                                            className="w-full px-3 py-1.5 border border-zinc-100 rounded-lg bg-white hover:bg-zinc-50 hover:border-zinc-300 transition-colors text-left flex items-center justify-between gap-2"
+                                                            className="w-full px-3 py-1.5 border border-zinc-100 dark:border-zinc-700 rounded-lg bg-white dark:bg-slate-800 hover:bg-zinc-50 dark:hover:bg-slate-700 hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors text-left flex items-center justify-between gap-2"
                                                         >
                                                             <span>
-                                                                <span className="font-medium text-xs text-zinc-800">{sg.studentName}</span>
+                                                                <span className="font-medium text-xs text-zinc-800 dark:text-zinc-100">{sg.studentName}</span>
                                                                 <span className="text-[11px] text-zinc-600 ml-2">-{sg.competencies.join(', ')}</span>
                                                             </span>
                                                         </button>
@@ -1342,7 +1342,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                         <p className="text-sm text-zinc-400">Loading...</p>
                     </div>
                 ) : progressData.length === 0 ? (
-                    <div className="p-8 border border-dashed border-zinc-200 rounded-xl bg-zinc-50 text-center text-zinc-400 text-sm">
+                    <div className="p-8 border border-dashed border-zinc-200 dark:border-zinc-700 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 text-center text-zinc-400 text-sm">
                         No completed practice sessions yet. Once a student completes a practice set, their scores will appear here.
                     </div>
                 ) : (

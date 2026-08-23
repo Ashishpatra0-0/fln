@@ -316,7 +316,7 @@ export const MicroPracticeAnswerEntry: React.FC<Props> = ({ token, paper, onDone
 
             {loading && <p className="text-sm text-zinc-400">Loading paper...</p>}
             {loadError && (
-                <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">{loadError}</div>
+                <div className="text-sm text-red-600 dark:text-red-300 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-3">{loadError}</div>
             )}
 
             {!loading && !loadError && !partResults && (
@@ -328,7 +328,7 @@ export const MicroPracticeAnswerEntry: React.FC<Props> = ({ token, paper, onDone
                                 <div className="space-y-3">
                                     {pdfLoading && <p className="text-sm text-zinc-400">Rendering PDF pages...</p>}
                                     {pdfError && (
-                                        <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
+                                        <div className="text-sm text-red-600 dark:text-red-300 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-3">
                                             {pdfError}{' '}
                                             <a href={paper.imageUrl} target="_blank" rel="noreferrer" className="font-bold underline">
                                                 Open the PDF directly instead.
@@ -367,14 +367,14 @@ export const MicroPracticeAnswerEntry: React.FC<Props> = ({ token, paper, onDone
                                         </p>
                                     )}
                                     {part.questions.map((q, idx) => (
-                                        <div key={q.question_id} className="border border-zinc-200 rounded-lg p-3">
-                                            <p className="text-sm text-zinc-800 mb-2">
+                                        <div key={q.question_id} className="border border-zinc-200 dark:border-zinc-700 rounded-lg p-3">
+                                            <p className="text-sm text-zinc-800 dark:text-zinc-100 mb-2">
                                                 Q{idx + 1}: {q.question}
                                             </p>
                                             {q.answer_type === 'visual-confirm' ? (
                                                 <div className="space-y-2">
-                                                    <div className="border border-zinc-200 rounded-lg p-3 bg-zinc-50 inline-block">
-                                                        <p className="text-xs text-zinc-500 mb-1">Correct drawing should look like:</p>
+                                                    <div className="border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 bg-zinc-50 dark:bg-zinc-800 inline-block">
+                                                        <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-1">Correct drawing should look like:</p>
                                                         {/* Safe: server-generated from a deterministic template
                                                             (tallyMarksSVG) driven by a stored numeric answer, not
                                                             user-controlled content. */}
@@ -386,7 +386,7 @@ export const MicroPracticeAnswerEntry: React.FC<Props> = ({ token, paper, onDone
                                                             onClick={() => setAnswer(partIndex, q.question_id, 'yes')}
                                                             className={`flex-1 text-sm font-medium py-2 rounded-lg border transition-colors ${(answers[partIndex] || {})[q.question_id] === 'yes'
                                                                 ? 'bg-emerald-600 text-white border-emerald-600'
-                                                                : 'bg-white text-zinc-700 border-zinc-200 hover:bg-zinc-50'
+                                                                : 'bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-700'
                                                                 }`}
                                                         >
                                                             Yes, Matches
@@ -396,7 +396,7 @@ export const MicroPracticeAnswerEntry: React.FC<Props> = ({ token, paper, onDone
                                                             onClick={() => setAnswer(partIndex, q.question_id, 'no')}
                                                             className={`flex-1 text-sm font-medium py-2 rounded-lg border transition-colors ${(answers[partIndex] || {})[q.question_id] === 'no'
                                                                 ? 'bg-red-600 text-white border-red-600'
-                                                                : 'bg-white text-zinc-700 border-zinc-200 hover:bg-zinc-50'
+                                                                : 'bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-700'
                                                                 }`}
                                                         >
                                                             No, Doesn't Match
@@ -406,7 +406,7 @@ export const MicroPracticeAnswerEntry: React.FC<Props> = ({ token, paper, onDone
                                             ) : q.answer_type === 'choice' && q.choices ? (
                                                 <div className="space-y-1.5">
                                                     {q.choices.map((choice) => (
-                                                        <label key={choice} className="flex items-center gap-2 text-sm p-2 border border-zinc-100 rounded-lg cursor-pointer hover:bg-zinc-50">
+                                                        <label key={choice} className="flex items-center gap-2 text-sm p-2 border border-zinc-100 dark:border-zinc-700 rounded-lg cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800">
                                                             <input
                                                                 type="radio"
                                                                 name={`p${partIndex}_${q.question_id}`}
@@ -424,7 +424,7 @@ export const MicroPracticeAnswerEntry: React.FC<Props> = ({ token, paper, onDone
                                                         value={(answers[partIndex] || {})[q.question_id] || ''}
                                                         onChange={(e) => setAnswer(partIndex, q.question_id, e.target.value)}
                                                         placeholder="Enter number"
-                                                        className="w-full text-sm border border-zinc-200 rounded-lg p-2"
+                                                        className="w-full text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
                                                     />
                                                     <p className="text-xs text-zinc-400 mt-1">Correct answer: {q.answer}</p>
                                                 </>
@@ -435,7 +435,7 @@ export const MicroPracticeAnswerEntry: React.FC<Props> = ({ token, paper, onDone
                                                         value={(answers[partIndex] || {})[q.question_id] || ''}
                                                         onChange={(e) => setAnswer(partIndex, q.question_id, e.target.value)}
                                                         placeholder="Enter answer"
-                                                        className="w-full text-sm border border-zinc-200 rounded-lg p-2"
+                                                        className="w-full text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
                                                     />
                                                     <p className="text-xs text-zinc-400 mt-1">Correct answer: {q.answer}</p>
                                                 </>
@@ -446,14 +446,14 @@ export const MicroPracticeAnswerEntry: React.FC<Props> = ({ token, paper, onDone
                             ))}
                         </div>
                         {saveDraftError && (
-                            <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3 mt-4">{saveDraftError}</div>
+                            <div className="text-sm text-red-600 dark:text-red-300 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-3 mt-4">{saveDraftError}</div>
                         )}
                         <div className="flex gap-3 pt-4">
                             <button
                                 type="button"
                                 onClick={handleSaveDraft}
                                 disabled={submitting || savingDraft}
-                                className="flex-1 bg-zinc-100 text-zinc-700 font-medium text-sm py-2.5 rounded-lg hover:bg-zinc-200 disabled:opacity-50"
+                                className="flex-1 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 font-medium text-sm py-2.5 rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-50"
                             >
                                 {savingDraft ? 'Saving...' : 'Save & Grade Later'}
                             </button>
@@ -478,14 +478,14 @@ export const MicroPracticeAnswerEntry: React.FC<Props> = ({ token, paper, onDone
                     )}
                     <div className="max-w-md mx-auto text-left space-y-2">
                         {partResults.map((r, idx) => (
-                            <div key={idx} className="flex items-center justify-between text-sm border border-zinc-100 rounded-lg p-2.5 bg-zinc-50">
-                                <span className="text-zinc-700 font-medium">{r.competency}</span>
+                            <div key={idx} className="flex items-center justify-between text-sm border border-zinc-100 dark:border-zinc-700 rounded-lg p-2.5 bg-zinc-50 dark:bg-zinc-800">
+                                <span className="text-zinc-700 dark:text-zinc-200 font-medium">{r.competency}</span>
                                 {r.success ? (
-                                    <span className="text-emerald-600 font-bold">
+                                    <span className="text-emerald-600 dark:text-emerald-400 font-bold">
                                         {r.correctCount}/{r.totalCount} ({r.scorePercent}%)
                                     </span>
                                 ) : (
-                                    <span className="text-red-600 text-xs">{r.error}</span>
+                                    <span className="text-red-600 dark:text-red-400 text-xs">{r.error}</span>
                                 )}
                             </div>
                         ))}

@@ -430,14 +430,14 @@ export const MicroPracticePaperUpload: React.FC<Props> = ({ token, onPaperIdenti
 
             {confirmReplace && (
                 <div className="space-y-4 text-center">
-                    <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-1">
+                    <div className="text-xs text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg p-4 space-y-1">
                         <p>You've already uploaded papers for: <b>{confirmReplace.names.join(', ')}</b>.</p>
                         <p>Do you want to replace their previously uploaded papers with these new ones?</p>
                     </div>
                     <div className="flex gap-3 justify-center">
                         <button
                             onClick={() => resolveConfirmReplace(false)}
-                            className="px-5 py-2 text-xs font-medium bg-zinc-100 text-zinc-700 rounded-lg hover:bg-zinc-200"
+                            className="px-5 py-2 text-xs font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-700"
                         >
                             No, Skip Them
                         </button>
@@ -462,7 +462,7 @@ export const MicroPracticePaperUpload: React.FC<Props> = ({ token, onPaperIdenti
                     <button
                         type="button"
                         onClick={() => fileInputRef.current?.click()}
-                        className="w-full text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg py-2.5 px-4 cursor-pointer"
+                        className="w-full text-xs font-semibold bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900 rounded-lg py-2.5 px-4 cursor-pointer"
                     >
                         Choose File
                     </button>
@@ -489,7 +489,7 @@ export const MicroPracticePaperUpload: React.FC<Props> = ({ token, onPaperIdenti
                                         <p className="text-sm text-zinc-400">Uploading and scanning...</p>
                                     )}
                                     {batch.status === 'error' && (
-                                        <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">{batch.error}</div>
+                                        <div className="text-sm text-red-600 dark:text-red-300 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-3">{batch.error}</div>
                                     )}
                                     {batch.status === 'done' && (
                                         <>
@@ -501,12 +501,12 @@ export const MicroPracticePaperUpload: React.FC<Props> = ({ token, onPaperIdenti
                                                 return (
                                                     <div
                                                         key={c.pageIndices.join('-')}
-                                                        className={`flex items-center gap-2 text-sm p-2 border rounded-lg ${isSkipped ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}
+                                                        className={`flex items-center gap-2 text-sm p-2 border rounded-lg ${isSkipped ? 'border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40' : 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40'}`}
                                                     >
-                                                        <span className={isSkipped ? 'text-amber-600' : 'text-emerald-600'}>{isSkipped ? '⏭' : '✓'}</span>
+                                                        <span className={isSkipped ? 'text-amber-600 dark:text-amber-300' : 'text-emerald-600 dark:text-emerald-400'}>{isSkipped ? '⏭' : '✓'}</span>
                                                         <span className="text-zinc-400 text-xs font-mono">{formatPageLabel(c.pageIndices)}</span>
-                                                        <span className="font-medium text-zinc-800">{c.payload.studentName}</span>
-                                                        {isSkipped && <span className="text-xs text-amber-700">— {c.skipReason}</span>}
+                                                        <span className="font-medium text-zinc-800 dark:text-zinc-100">{c.payload.studentName}</span>
+                                                        {isSkipped && <span className="text-xs text-amber-700 dark:text-amber-300">— {c.skipReason}</span>}
                                                     </div>
                                                 );
                                             })}
@@ -525,7 +525,7 @@ export const MicroPracticePaperUpload: React.FC<Props> = ({ token, onPaperIdenti
                         <button
                             type="button"
                             onClick={() => fileInputRef.current?.click()}
-                            className="flex-1 bg-zinc-100 text-zinc-700 font-medium text-sm py-2.5 rounded-lg hover:bg-zinc-200"
+                            className="flex-1 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 font-medium text-sm py-2.5 rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-700"
                         >
                             + Upload More Files
                         </button>
@@ -548,7 +548,7 @@ export const MicroPracticePaperUpload: React.FC<Props> = ({ token, onPaperIdenti
                     {allCandidates.length > 1 && (
                         <div className="space-y-1">
                             {allCandidates.map((c, idx) => (
-                                <div key={idx} className="flex items-center justify-between text-xs p-2 border border-zinc-100 rounded-lg">
+                                <div key={idx} className="flex items-center justify-between text-xs p-2 border border-zinc-100 dark:border-zinc-700 rounded-lg">
                                     <span>{formatPageLabel(c.pageIndices)} — {c.payload.studentName}</span>
                                     <span className={
                                         c.status === 'uploaded' ? 'text-emerald-600 font-bold' :
@@ -583,17 +583,17 @@ export const MicroPracticePaperUpload: React.FC<Props> = ({ token, onPaperIdenti
                                 <div
                                     key={idx}
                                     className={`flex items-center justify-between text-sm p-2.5 rounded-lg border ${
-                                        c.status === 'uploaded' ? 'border-emerald-200 bg-emerald-50' :
-                                        isSkipped ? 'border-amber-200 bg-amber-50' : 'border-red-200 bg-red-50'
+                                        c.status === 'uploaded' ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40' :
+                                        isSkipped ? 'border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40' : 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/40'
                                     }`}
                                 >
-                                    <span className="font-medium text-zinc-800">{formatPageLabel(c.pageIndices)} — {c.payload.studentName}</span>
+                                    <span className="font-medium text-zinc-800 dark:text-zinc-100">{formatPageLabel(c.pageIndices)} — {c.payload.studentName}</span>
                                     {c.status === 'uploaded' ? (
-                                        <span className="text-emerald-600 text-xs font-bold">✓ Uploaded</span>
+                                        <span className="text-emerald-600 dark:text-emerald-400 text-xs font-bold">✓ Uploaded</span>
                                     ) : isSkipped ? (
-                                        <span className="text-amber-700 text-xs" title={c.skipReason}>⏭ Skipped — {c.skipReason}</span>
+                                        <span className="text-amber-700 dark:text-amber-300 text-xs" title={c.skipReason}>⏭ Skipped — {c.skipReason}</span>
                                     ) : (
-                                        <span className="text-red-600 text-xs" title={c.uploadError}>✗ {c.uploadError || 'Failed'}</span>
+                                        <span className="text-red-600 dark:text-red-400 text-xs" title={c.uploadError}>✗ {c.uploadError || 'Failed'}</span>
                                     )}
                                 </div>
                             );
@@ -611,7 +611,7 @@ export const MicroPracticePaperUpload: React.FC<Props> = ({ token, onPaperIdenti
                         <button
                             onClick={onCancel}
                             className={successResults.length > 0
-                                ? 'flex-1 bg-zinc-100 text-zinc-700 font-medium text-sm py-2.5 rounded-lg hover:bg-zinc-200'
+                                ? 'flex-1 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 font-medium text-sm py-2.5 rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-700'
                                 : 'w-full bg-zinc-900 text-white font-medium text-sm py-2.5 rounded-lg hover:bg-zinc-800'}
                         >
                             Close
