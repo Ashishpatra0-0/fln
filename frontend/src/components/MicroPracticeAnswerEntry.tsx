@@ -167,11 +167,8 @@ export const MicroPracticeAnswerEntry: React.FC<Props> = ({ token, paper, onDone
         }));
     };
 
-    // Submits each part separately to /api/practice/submit, sequentially, so
-    // each competency's sub-level/scheduling advances independently — matches
-    // how individual (single-competency) generation already behaves. Keeps
-    // going even if one part fails, so a bad competency in one part doesn't
-    // block the others from being recorded.
+    // Submits each part separately so each competency's scheduling advances
+    // independently; keeps going if one part fails.
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setSubmitting(true);

@@ -515,22 +515,13 @@ export interface MicroPracticePaperResult {
   paperId: string;
 }
 
-// Classifies a micro-practice answer's stored TYPE for the frontend answer-entry
-// form. Based on the actual correctAnswer VALUE, not just the generator's internal
-// answerType label — fill-blank in particular produces numbers, comparison symbols
-// (<, >, =), fractions ("3/4"), comma-joined lists, time strings, and even
-// {tens, ones}-style objects, so a blanket "fill-blank -> number" mapping would
-// route several of those into a numeric-only input. circle-choice can carry an
-// array of correct indices (multi-select, e.g. "circle all right angles") — that
-// doesn't fit 'choice' any better than it fits 'number', but 'choice' is the
-// least-wrong of the three; representing multi-select answers properly is a
-// follow-up for the manual-entry/scoring parts, not solved here.
+// Classifies a micro-practice answer's stored TYPE for the answer-entry form,
+// based on the actual correctAnswer VALUE rather than the generator's answerType
+// label — fill-blank alone can produce numbers, symbols, fractions, or objects.
 function inferAnswerType(item: any): 'text' | 'number' | 'choice' | 'visual-confirm' {
   if (item.answerType === 'mcq' || item.answerType === 'circle-choice') return 'choice';
-  // draw-count sections (e.g. frequency-tally-table, count-and-tally) carry a
-  // pre-rendered referenceImageSvg (attached in generateMicroSet) instead of
-  // a typed value — graded by the teacher visually comparing it to the
-  // student's photo, not by string comparison.
+  // draw-count carries a pre-rendered referenceImageSvg instead of a typed
+  // value — graded by visual comparison, not string comparison.
   if (item.answerType === 'draw-count') return 'visual-confirm';
   const val = item.correctAnswer;
   if (typeof val === 'number') return 'number';
@@ -538,14 +529,8 @@ function inferAnswerType(item: any): 'text' | 'number' | 'choice' | 'visual-conf
   return 'text';
 }
 
-// circle-choice/mcq answers carry {optionIndex, ...} plus a friendly label
-// field (icon name, display value, option text) alongside the index used to
-// grade OMR position — show that label instead of dumping the raw object.
-// Falls back to "Option N" for the rare shape that carries only an index
-// (e.g. some yes/no-style circle questions), and to JSON.stringify only for
-// truly multi-value shapes (fill-blank's {a,b,sum} etc., or arrays like
-// ordering's sorted-number-list answers) where there is no single "the
-// answer" to extract.
+// circle-choice/mcq answers carry a friendly label alongside the OMR index —
+// show that label, falling back to "Option N" or JSON.stringify as needed.
 function formatCorrectAnswer(item: any): string {
   const val = item.correctAnswer;
   if (val == null) return '';
@@ -561,22 +546,8 @@ function formatCorrectAnswer(item: any): string {
   return JSON.stringify(val);
 }
 
-// Puppeteer's headerTemplate/footerTemplate render identically on every
-// page and there is no reliable way to distinguish page 1 from later pages
-// from within a single shared template — confirmed by direct testing:
-// <script> tags inside header/footer templates never execute (a placeholder
-// string left untouched proved this), and the auto-populated .pageNumber
-// text is a print-time-only substitution invisible to any script running in
-// that same context, so there's no JS or CSS path to branch on it either.
-//
-// This renders the PDF with a page-1 header (no continuation divider) once,
-// and only if the result is more than one page, renders AGAIN with a
-// continuation-page header (divider included) restricted to pages 2..N via
-// pageRanges, then splices the two together with pdf-lib. The first render
-// doubles as the final single-page result when there's nothing to splice —
-// single-page papers (the common case) cost exactly one render. An explicit
-// end bound is always used for pageRanges: an open-ended '2-' throws
-// "Page range exceeds page count" when there is no page 2.
+// Puppeteer can't distinguish page 1 from later pages in one header template,
+// so this renders a page-1 header, then a continuation variant for pages 2..N, and splices them.
 async function renderPdfWithContinuationDivider(
   printPage: any,
   pdfOptsBase: { format: 'A4'; printBackground: true; margin: { top: string; right: string; bottom: string; left: string }; displayHeaderFooter: true; footerTemplate: string },
@@ -599,12 +570,8 @@ async function renderPdfWithContinuationDivider(
   return Buffer.from(await merged.save());
 }
 
-/**
- * Generate a single-section, lightweight micro-practice PDF for one student:
- * drives Puppeteer against the same levels_main.html the full worksheet
- * generator uses, but calls generateMicroSet (one section, once) instead of
- * generateOneSet (full multi-section worksheet).
- */
+// Generates a single-section micro-practice PDF via levels_main.html's
+// generateMicroSet (vs. generateOneSet's full multi-section worksheet).
 export async function generateMicroPracticePaper({
   studentId,
   studentName,
@@ -689,10 +656,8 @@ body{font-family:'Segoe UI',Arial,sans-serif;margin:0;background:#fff;color:var(
     await printPage.setContent(wrappedHtml, { waitUntil: 'networkidle0' as any, timeout: 15000 });
     await printPage.setViewport({ width: 794, height: 1123 });
 
-    // QR + footer repeat via Puppeteer's native headerTemplate/footerTemplate
-    // (not in-body content) so they render correctly on every physical page —
-    // see renderPdfWithContinuationDivider for why the divider needs a
-    // separate header variant rather than a conditional inside one template.
+    // QR + footer via Puppeteer's headerTemplate/footerTemplate so they repeat
+    // on every physical page (see renderPdfWithContinuationDivider for the divider).
     const headerNoDivider = `<div style="width:100%;font-size:0;position:relative;">
       <img src="${qrDataUrl}" style="position:absolute;top:1mm;right:8mm;width:26mm;height:26mm;" />
     </div>`;
@@ -761,17 +726,8 @@ export interface MultiCompetencyMicroPaperResult {
   parts: MicroPracticePart[];
 }
 
-/**
- * Generate ONE combined micro-practice PDF covering multiple weak
- * competencies for a single student, each as a labeled "Part N: <competency>"
- * section. Reuses generateMicroSet once per competency against the SAME
- * loaded levels_main.html page (one navigation, N evaluate calls) rather
- * than reloading per part. levelId/subIdx per competency are resolved by the
- * caller (index.ts's resolveCompetencyLevels, against each student's
- * PracticeSchedule) rather than here — this function only renders the exact
- * coordinates it's given, the same contract generateMicroPracticePaper
- * already follows for a single competency.
- */
+// Generates ONE combined PDF covering multiple weak competencies, each as a
+// "Part N: <competency>" section. levelId/subIdx per part are resolved by the caller.
 export async function generateMultiCompetencyMicroPaper({
   studentId,
   studentName,
@@ -886,22 +842,9 @@ body{font-family:'Segoe UI',Arial,sans-serif;margin:0;background:#fff;color:var(
 @media print{body{background:#fff;}.page-wrapper{box-shadow:none;margin:0;}}
     `;
 
-    // The QR and the footer stamp are rendered via Puppeteer's native
-    // per-page headerTemplate/footerTemplate (not in-body position:fixed)
-    // so they repeat correctly on every page. Two things were tested and
-    // ruled out first: (1) a JS margin.top on printPage.pdf() alone is a
-    // no-op here — preferCSSPageSize + this page's own @page{margin:0} rule
-    // takes priority over it; only a real @page{margin-top} in the CSS (or,
-    // as used here, the header/footer-template path, which honors the JS
-    // margin option by design) actually reserves space on every page.
-    // (2) compensating the QR's own position:fixed offset to counteract a
-    // CSS @page margin shift (via a negative `top` or a `transform`)
-    // produces broken/duplicated rendering in Chromium's print pipeline —
-    // not just misalignment. headerTemplate avoids that whole problem: its
-    // coordinate system starts at the true page edge, so `top:9mm` there
-    // reproduces the QR's original on-page position exactly, with no
-    // compensation math needed, while still letting `margin.top` reserve
-    // real space in the body's normal flow on every page.
+    // QR/footer use Puppeteer's headerTemplate/footerTemplate, not in-body
+    // position:fixed — a JS margin.top alone is a no-op here (preferCSSPageSize
+    // wins), and compensating position:fixed against a CSS @page margin shift breaks rendering in Chromium.
     const wrappedHtml = `<!DOCTYPE html><html><head><style>${styleBlock}</style></head><body>
       <div class="page-wrapper">
         <div class="page-header">
@@ -915,10 +858,8 @@ body{font-family:'Segoe UI',Arial,sans-serif;margin:0;background:#fff;color:var(
     await printPage.setContent(wrappedHtml, { waitUntil: 'networkidle0' as any, timeout: 15000 });
     await printPage.setViewport({ width: 794, height: 1123 });
 
-    // top must clear the QR's own footprint (1mm offset + 26mm size = 27mm)
-    // on every page; bottom leaves room for the footer stamp. Two header
-    // variants (with/without the continuation-page divider) are needed
-    // instead of one — see renderPdfWithContinuationDivider for why.
+    // top clears the QR's footprint (1mm + 26mm); two header variants are
+    // needed for the continuation-page divider (see renderPdfWithContinuationDivider).
     const headerNoDivider = `<div style="width:100%;font-size:0;position:relative;">
       <img src="${qrDataUrl}" style="position:absolute;top:1mm;right:8mm;width:26mm;height:26mm;" />
     </div>`;
@@ -961,11 +902,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;margin:0;background:#fff;color:var(
   }
 }
 
-/**
- * Merges multiple already-generated PDF files (e.g. one per student from a
- * bulk-generate run) into a single combined PDF, back-to-back in the order
- * given. Used by POST /api/practice/bulk-generate.
- */
+// Merges already-generated PDFs back-to-back in order. Used by POST /api/practice/bulk-generate.
 export async function mergeMicroPracticePdfs(pdfFilePaths: string[]): Promise<{ fileName: string; filePath: string; pdfUrl: string }> {
   const mergedPdf = await PDFDocument.create();
   for (const srcPath of pdfFilePaths) {
@@ -981,13 +918,8 @@ export async function mergeMicroPracticePdfs(pdfFilePaths: string[]): Promise<{ 
   return { fileName, filePath, pdfUrl: `/output/${fileName}` };
 }
 
-/**
- * Merges page images (PNG data URLs) into a single multi-page PDF, one page
- * per image. Used by POST /api/practice/upload-paper when a scanned paper
- * spans multiple physical pages (all sharing the same paperId QR) — instead
- * of only keeping the first page's image, every page is preserved so
- * grading later can see the student's full handwritten answers.
- */
+// Merges page images into one multi-page PDF, so a scanned paper spanning
+// multiple physical pages keeps every page (not just the first) for grading.
 export async function mergeImagesIntoPdf(imageDataUrls: string[]): Promise<Buffer> {
   const pdfDoc = await PDFDocument.create();
   const A4_WIDTH = 595.28;
@@ -1003,11 +935,8 @@ export async function mergeImagesIntoPdf(imageDataUrls: string[]): Promise<Buffe
   return Buffer.from(bytes);
 }
 
-/**
- * Zips a set of already-generated PDF files, one entry per student, so
- * individual papers can be handled/printed separately. Used by
- * POST /api/practice/bulk-generate.
- */
+// Zips generated PDFs, one entry per student, for individual printing.
+// Used by POST /api/practice/bulk-generate.
 export async function zipMicroPracticePdfs(entries: { fileName: string; filePath: string }[]): Promise<{ fileName: string; filePath: string; zipUrl: string }> {
   const zip = new JSZip();
   for (const entry of entries) {

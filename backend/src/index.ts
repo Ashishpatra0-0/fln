@@ -62,11 +62,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
-// execFileSync throws on non-zero exit before we can read stdout normally.
-// Our Python scripts print a JSON error line to stdout before exiting
-// non-zero on failure, so pull the real message out of e.stdout instead of
-// using execFileSync's generic "Command failed: ..." wrapper text. Used by
-// /api/icr/rasterize-pdf below, which has no routes/*.ts equivalent.
+// execFileSync throws before we can read stdout normally, so pull the real
+// JSON error line our Python scripts print instead of its generic wrapper text.
 function extractPythonScriptError(e: any, fallbackPrefix: string): string {
   const stdout: string = typeof e?.stdout === 'string' ? e.stdout : (e?.stdout ? String(e.stdout) : '');
   const lastLine = stdout.trim().split('\n').filter(Boolean).pop();
@@ -150,19 +147,8 @@ async function startServer() {
   registerAnalyticsRoutes(app);
   registerDiagnosticBulkRoutes(app);
 
-  // Rasterizes an uploaded PDF to plain PNG data URL(s) — nothing else. Used
-  // by the micro-practice paper-upload flow so it can run jsQR (which only
-  // reads pixel data, not PDFs) against a PDF-scanned completed paper.
-  // Deliberately does NOT chain the blue-ink filter that /api/icr/filter
-  // runs afterward — that step isolates handwritten blue pen and explicitly
-  // discards printed text (per bluepen_filter.py's own docstring), which
-  // would destroy a printed QR code.
-  //
-  // Default (allPages absent/false): rasterizes page 1 only, returns a
-  // single `imageDataUrl` — unchanged, backward-compatible behavior.
-  // allPages: true: rasterizes every page, returns `imageDataUrls` (array,
-  // one per page) instead — used for multi-page PDFs that may contain
-  // multiple different students' papers, one per page.
+  // Rasterizes an uploaded PDF to PNG so jsQR (pixel-only) can read it;
+  // skips the blue-ink filter, which would destroy a printed QR. allPages renders every page for multi-page scans.
   app.post('/api/icr/rasterize-pdf', async (req, res) => {
     const user = getAuthUser(req);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
@@ -300,10 +286,8 @@ async function startServer() {
     res.json(await getWeakCompetenciesForStudent(req.params.id));
   });
 
-  // Generate a lightweight, single-section printable PDF for one micro-practice
-  // question set (see generateMicroPracticePaper in paperGenerator.ts). Distinct
-  // from /api/worksheets/generate-level-pdf, which renders the full multi-section
-  // level worksheet.
+  // Generates a single-section micro-practice PDF — distinct from
+  // /api/worksheets/generate-level-pdf's full multi-section worksheet.
   app.post('/api/students/:id/micro-practice/generate-pdf', async (req, res) => {
     const user = getAuthUser(req);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
@@ -321,14 +305,8 @@ async function startServer() {
       return res.status(400).json({ error: 'questionCount must be a positive integer.' });
     }
 
-    // Two ways to pick the level/subIdx to generate:
-    //  - competency (the normal, adaptive path): resolved from the student's
-    //    PracticeSchedule for that competency — their real current position,
-    //    not always the strand's easiest level. Blocked once resolved: true,
-    //    since there's no harder real content left to generate.
-    //  - explicit levelId+subIdx (manual override): a teacher deliberately
-    //    targeting a specific level, bypassing the schedule entirely — the
-    //    schedule is neither read nor advanced by this path.
+    // competency: resolved from the student's PracticeSchedule (adaptive,
+    // blocked once resolved). levelId+subIdx: manual override, bypassing the schedule entirely.
     let levelId: number, subIdx: number;
     if (overrideLevelId != null && overrideSubIdx != null) {
       levelId = Number(overrideLevelId);
@@ -362,10 +340,8 @@ async function startServer() {
         questionCount: Number(questionCount)
       });
 
-      // Persist the real, generation-time answer key so it can be looked up
-      // later by paperId (see GET /api/practice/paper/:paperId below) instead
-      // of re-running generateMicroSet, which would produce different random
-      // question values on a second call.
+      // Persist the real answer key so it can be looked up by paperId later,
+      // instead of re-running generateMicroSet (which would randomize differently).
       await dbStore.addMicroPracticePaper({
         id: result.paperId,
         studentId: student.id,
@@ -387,10 +363,8 @@ async function startServer() {
     }
   });
 
-  // Generate ONE combined printable PDF covering multiple weak competencies
-  // for a single student (see generateMultiCompetencyMicroPaper in
-  // paperGenerator.ts). Distinct from /api/students/:id/micro-practice/generate-pdf,
-  // which covers exactly one competency per paper.
+  // Generates ONE combined PDF covering multiple weak competencies — distinct
+  // from generate-pdf above, which covers exactly one competency per paper.
   app.post('/api/students/:id/micro-practice/generate-multi-pdf', async (req, res) => {
     const user = getAuthUser(req);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
@@ -461,16 +435,8 @@ async function startServer() {
 
   const microBulkJobs = new Map<string, MicroBulkJob>();
 
-  // Generates a personalized multi-competency micro-practice paper for every
-  // student in studentIds, in one action. Students with no weak competencies
-  // on record (not yet diagnosed) are skipped, not failed. One student's
-  // failure — missing student, forbidden access, or a generation error —
-  // does not stop the rest of the batch from processing.
-  //
-  // Runs as a background job (same pattern as /api/diagnostic/bulk) rather
-  // than blocking the request until every student is done, so the frontend
-  // can poll GET /api/practice/bulk-generate/:jobId/progress for a live
-  // completed/total counter instead of waiting on one long request.
+  // Generates a multi-competency paper per student in one action; a missing/
+  // forbidden/failing student is skipped, not fatal. Runs as a background job (like /api/diagnostic/bulk), polled via progress below.
   app.post('/api/practice/bulk-generate', async (req, res) => {
     const user = getAuthUser(req);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
@@ -517,11 +483,8 @@ async function startServer() {
           }
 
           try {
-            // A caller-supplied override (e.g. "papers due today") takes the
-            // exact competency list as given — it already implies real
-            // schedule/evaluation history, so the "not yet diagnosed" skip
-            // below only applies when falling back to the full weak-competency
-            // list from the student's latest evaluation report.
+            // A caller-supplied override takes the exact competency list as
+            // given; the "not yet diagnosed" skip below only applies to the fallback weak-competency list.
             const overrideCompetencies = studentCompetencyOverrides?.[studentId];
             let competencies: string[];
             if (Array.isArray(overrideCompetencies) && overrideCompetencies.length > 0) {
@@ -607,10 +570,8 @@ async function startServer() {
     });
   });
 
-  // Poll a micro-practice bulk-generation job's progress. Returns results/
-  // combinedPdfUrl/zipUrl directly once status is 'completed' — no separate
-  // download route, since outputs are already static-served /output/... URLs
-  // (unlike /api/diagnostic/bulk's res.download() pattern).
+  // Poll a bulk-generation job; results/combinedPdfUrl/zipUrl come back
+  // directly once 'completed' — no separate download route needed since outputs are already static-served.
   app.get('/api/practice/bulk-generate/:jobId/progress', (req, res) => {
     const job = microBulkJobs.get(req.params.jobId);
     if (!job) return res.status(404).json({ error: 'Job not found.' });
@@ -627,11 +588,8 @@ async function startServer() {
     });
   });
 
-  // Looks up the real, generation-time answer key for a printed micro-practice
-  // paper by its paperId (embedded in the paper's QR code). Used by the manual
-  // answer-entry flow after a photo is uploaded and decoded — deliberately
-  // NOT re-running generateMicroSet, since its generators are unseeded random
-  // and would produce different questions/answers than what was printed.
+  // Looks up a paper's real answer key by paperId, rather than re-running
+  // generateMicroSet, which is unseeded and would produce different questions.
   app.get('/api/practice/paper/:paperId', async (req, res) => {
     const user = getAuthUser(req);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
@@ -652,10 +610,8 @@ async function startServer() {
     res.json({ ...paper, draftAnswers: uploadedPaper?.draftAnswers });
   });
 
-  // Saves in-progress, ungraded answers against the matching UploadedPaper
-  // record so a teacher can resume grading later. Deliberately does not
-  // touch gradingStatus/gradedCompetencies — this is a raw draft, not a
-  // submission.
+  // Saves in-progress ungraded answers so a teacher can resume later; doesn't
+  // touch gradingStatus — this is a draft, not a submission.
   app.patch('/api/practice/paper/:paperId/save-draft', async (req, res) => {
     const user = getAuthUser(req);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
@@ -678,13 +634,8 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // Pre-flight check for the paper-upload batch UI: given the paperIds
-  // decoded client-side from a set of QR codes (before any image is
-  // actually uploaded), reports which ones already have an UploadedPaper
-  // record — and whether that record is still 'pending' (offer to replace)
-  // or already 'graded' (nothing to do but skip). Scoped with the same
-  // canAccessStudent check as the upload route itself, so this can't be
-  // used to probe grading status of students outside the caller's roster.
+  // Pre-flight check for client-decoded paperIds: reports which already have
+  // an UploadedPaper record, and whether it's 'pending' (offer replace) or 'graded' (skip). Scoped like the upload route itself.
   app.post('/api/practice/upload-paper/check-duplicates', async (req, res) => {
     const user = getAuthUser(req);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
@@ -714,20 +665,9 @@ async function startServer() {
     res.json({ duplicates });
   });
 
-  // Stores an uploaded photo of a completed micro-practice paper. No image
-  // processing/QR-decoding happens here — the frontend already decoded the
-  // paper's QR code before calling this; these fields are just echoed back
-  // (with the resolved competency added) so the frontend can hand off a
-  // fully-identified paper to the next step. Also persists an UploadedPaper
-  // record (gradingStatus: 'pending') when paperId + studentId are present,
-  // so an uploaded-but-ungraded paper can be found later via
-  // GET /api/practice/pending-papers instead of only living in-memory for
-  // the current browser session.
-  //
-  // An optional replaceUploadedPaperId (from the check-duplicates flow above)
-  // means the teacher confirmed replacing a still-pending duplicate: the
-  // existing record is updated in place (new image, same id/uploadedAt/
-  // uploadBatchId) instead of inserting a second row for the same paperId.
+  // Stores an uploaded photo; the frontend already decoded the QR, so this
+  // just persists an UploadedPaper record ('pending') for later grading.
+  // replaceUploadedPaperId updates an existing pending duplicate in place instead of inserting a second row.
   app.post('/api/practice/upload-paper', async (req, res) => {
     const user = getAuthUser(req);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
@@ -748,10 +688,7 @@ async function startServer() {
     }
 
     // Re-check the replace target's status right before writing — it may
-    // have been graded in the gap between the check-duplicates call and this
-    // upload (e.g. another tab graded it), in which case silently
-    // overwriting its image would be wrong; the teacher needs to know it's
-    // no longer a pending duplicate.
+    // have been graded in the gap since the check-duplicates call.
     let replaceTarget: UploadedPaper | undefined;
     if (replaceUploadedPaperId) {
       replaceTarget = await dbStore.getUploadedPaperById(replaceUploadedPaperId);
@@ -792,11 +729,8 @@ async function startServer() {
 
       let uploadedPaperId: string | null = null;
       if (replaceTarget) {
-        // Replace in place: keep the record's id/uploadedAt/uploadBatchId so
-        // it stays the same row in the pending-papers list, just pointing at
-        // the new image. The old photo was presumably wrong/unreadable —
-        // delete it from disk (best-effort; a failure here shouldn't fail
-        // the upload itself, it just leaves one orphaned file).
+        // Replace in place, keeping id/uploadedAt/uploadBatchId; best-effort
+        // delete of the old image file (non-fatal if it fails).
         await dbStore.updateUploadedPaper(replaceTarget.id, {
           imageUrl,
           studentName: studentName || replaceTarget.studentName
@@ -847,17 +781,9 @@ async function startServer() {
     }
   });
 
-  // Three-tier scoring/scheduling against REAL content position (levelId +
-  // subIdx in the 59-level micro-practice system), not an abstract counter:
-  // >=80% advances to the next subIdx within the current level; once that
-  // level's variations are exhausted, moves to the next-harder level in the
-  // same strand (getNextLevelInStrand) and resets to subIdx 0; if no next
-  // level exists either (the strand's hardest level, exhausted), the
-  // competency is resolved — no further real content to advance to. 50-79%
-  // is a "hold" tier — no change to levelId/subIdx or interval; <50% halves
-  // the interval (min 1 day) without moving position backward. In all
-  // cases the interval only ever grows on a good score (max 30 days) and
-  // only ever shrinks on a poor one — never on a hold.
+  // Three-tier scoring against real levelId/subIdx: >=80% advances subIdx
+  // (or the next strand level, or resolves if none left); 50-79% holds;
+  // <50% halves the interval. Interval only grows on success, shrinks on failure, never on a hold.
   function calculateNextScheduleState(
     currentIntervalDays: number,
     currentLevelId: number,
@@ -889,12 +815,9 @@ async function startServer() {
   }
 
 
-  // Resolves each competency in a list to the student's real current
-  // levelId/subIdx (creating/backfilling each schedule as needed via
-  // getOrInitPracticeSchedule), splitting out any that are already resolved
-  // (fully mastered — no further real content to generate a paper for).
-  // Shared by the multi-competency single-paper route and the bulk-generate
-  // job below, since both build a "Part N: <competency>" paper the same way.
+  // Resolves each competency to the student's real levelId/subIdx (via
+  // getOrInitPracticeSchedule), splitting out already-mastered ones. Shared
+  // by the multi-competency and bulk-generate routes.
   async function resolveCompetencyLevels(
     studentId: string, studentName: string, teacherId: string, competencies: string[]
   ): Promise<{ resolved: { competency: string; levelId: number; subIdx: number }[]; masteredCompetencies: string[] }> {
@@ -911,10 +834,8 @@ async function startServer() {
     return { resolved, masteredCompetencies };
   }
 
-  // IST has no DST, so a fixed +5:30 offset is exact — no timezone library
-  // needed. Returns the UTC instant corresponding to 00:00:00 IST on
-  // (fromDate + intervalDays), so a schedule becomes "due" from the start of
-  // its due day in IST, not at the exact time-of-day it was last graded.
+  // IST has no DST, so a fixed +5:30 offset is exact. Returns the UTC instant
+  // for 00:00 IST on (fromDate + intervalDays).
   const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
   function nextDueDateIST(fromDate: Date, intervalDays: number): Date {
     const istNow = new Date(fromDate.getTime() + IST_OFFSET_MS);
@@ -1050,13 +971,8 @@ async function startServer() {
     const student = students.find(s => s.id === studentId);
     if (!student) return res.status(404).json({ error: 'Student not found.' });
 
-    // Reject re-grading a competency that was already graded for this exact
-    // paper — without this, resubmitting the same paperId+competency (e.g. a
-    // duplicate upload graded twice, or a teacher hitting submit again) would
-    // silently re-score and double-advance the student's PracticeSchedule
-    // (subIdx/interval) a second time for work that was already counted.
-    // Keyed on the specific competency, not overall gradingStatus, since a
-    // multi-part paper is graded one competency at a time.
+    // Reject re-grading a competency already graded for this paper — otherwise
+    // a resubmit would double-advance the schedule for work already counted.
     if (paperId) {
       const existingUploadedPaper = await dbStore.getUploadedPaperByPaperId(paperId);
       if (existingUploadedPaper?.gradedCompetencies.includes(competency)) {
@@ -1064,10 +980,8 @@ async function startServer() {
       }
     }
 
-    // Find or create the schedule now, at actual submission time (a no-op
-    // find in the normal flow, since generation already creates/backfills it
-    // via the same helper — kept here too for paperless/legacy submissions
-    // that never went through a generate call).
+    // Usually a no-op find (generation already created/backfilled it); kept
+    // for paperless/legacy submissions that skipped a generate call.
     let schedule: PracticeSchedule;
     try {
       schedule = await getOrInitPracticeSchedule(studentId, student.name, user.id, competency);
@@ -1103,9 +1017,7 @@ async function startServer() {
     };
     await dbStore.addMicroAssignment(assignment);
 
-    // Update the schedule's real-content position (levelId/subIdx), resolved
-    // flag, and next due date together using the three-tier scoring logic.
-    // schedule.currentLevelId is guaranteed set here — getOrInitPracticeSchedule
+    // schedule.currentLevelId is guaranteed set — getOrInitPracticeSchedule
     // above never returns a schedule without one.
     const nextState = calculateNextScheduleState(
       schedule.intervalDays,
@@ -1124,11 +1036,8 @@ async function startServer() {
       lastCompletedAt: now
     });
 
-    // If this submission is tied to an uploaded paper (paperId supplied),
-    // record this competency as graded and only flip the paper's overall
-    // gradingStatus to 'graded' once every part has been submitted —
-    // a 3-competency paper shouldn't drop off the pending list after just
-    // one of its parts is done.
+    // Only flip gradingStatus to 'graded' once every part is submitted — a
+    // multi-competency paper shouldn't drop off pending after just one part.
     if (paperId) {
       const uploadedPaper = await dbStore.getUploadedPaperByPaperId(paperId);
       if (uploadedPaper && uploadedPaper.gradingStatus !== 'graded') {
@@ -1151,10 +1060,8 @@ async function startServer() {
     });
   });
 
-  // Papers that have been photographed/uploaded but not yet fully graded
-  // (see UploadedPaper in db.ts). Scoped the same way as /api/practice/due:
-  // teachers see their own uploads, admin-tier roles see everything, other
-  // roles get nothing since this feature is teacher-driven.
+  // Uploaded-but-ungraded papers, scoped like /api/practice/due: teachers see
+  // their own, admin-tier roles see all, others get nothing.
   app.get('/api/practice/pending-papers', async (req, res) => {
     const user = getAuthUser(req);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
@@ -1172,10 +1079,8 @@ async function startServer() {
     res.json(pending);
   });
 
-  // Overview of all practiced competencies per student, independent of due
-  // status. Groups completed micro-assignments by (studentId, competency) and
-  // returns the latest score + attempt count for each — this powers the
-  // "Student Progress" section, separate from the due-today scheduling list.
+  // Groups completed micro-assignments by (studentId, competency), latest
+  // score + attempt count each — powers "Student Progress", not due-today.
   app.get('/api/practice/progress', async (req, res) => {
     const user = getAuthUser(req);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });

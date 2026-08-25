@@ -5,14 +5,9 @@ import { randomUUID } from 'crypto';
 // Shared practice-schedule creation and reconciliation logic, used by both
 // index.ts and routes/students.ts.
 
-// Normalizes a raw conceptMastery topic string against the 9 known
-// competency names. Exact match (case-insensitive) first; otherwise, if the
-// raw string is a substring of EXACTLY ONE known competency (e.g.
-// "Operations" -> "Number Operations"), use that. If it's ambiguous — the
-// fragment could plausibly belong to more than one known competency (e.g.
-// "Number" matches both "Number Sense" and "Number Operations") — we don't
-// guess; the raw string is returned unchanged rather than risk an incorrect
-// match.
+// Normalizes a raw conceptMastery topic against the 9 known competency names:
+// exact match first, else a substring match only if unambiguous — otherwise
+// returns the raw string unchanged rather than guess.
 export function normalizeCompetencyName(raw: string): string {
   const target = raw.trim().toLowerCase();
   if (!target) return raw;
@@ -28,17 +23,10 @@ export function normalizeCompetencyName(raw: string): string {
   return raw;
 }
 
-// Single creation point for a competency's PracticeSchedule — used both at
-// generation time (so generation can read a real position) and at submit
-// time (unchanged trigger point for legacy/paperless submissions).
-// Guarantees exactly one code path decides what a brand-new or legacy
-// (pre-currentLevelId) schedule's starting position is: the competency's
-// easiest level, subIdx 0 — persisted as a real levelId instead of implied.
-//
-// A schedule missing currentLevelId (written before this field existed, or
-// any competency string that no longer maps to a strand) is treated as
-// needing backfill: currentSubIdx is reset to 0 rather than trusting an old
-// 0/1/2 value that was never validated against a specific level.
+// Single creation point for a competency's PracticeSchedule, used at both
+// generation and submit time. A schedule missing currentLevelId (legacy,
+// pre-this-field) is backfilled to the competency's easiest level rather
+// than trusting its old, unvalidated 0/1/2 value.
 export async function getOrInitPracticeSchedule(
   studentId: string,
   studentName: string,
@@ -83,17 +71,10 @@ export async function getOrInitPracticeSchedule(
   return created;
 }
 
-// Ensures a PracticeSchedule row exists for every competency this
-// diagnostic flagged 'Needs Practice' — without this, a competency that's
-// never been weak before (a brand-new student's first diagnostic, or an
-// existing student's newly-weak competency) has NO schedule at all, so it
-// silently never appears in Due Today until a teacher happens to
-// generate/grade a paper for it. Called before
-// reconcilePracticeSchedulesWithDiagnostic, not merged into it: this only
-// ever creates missing rows (via the same single creation point,
-// getOrInitPracticeSchedule, so it's a no-op for a competency that already
-// has one); reconcile's job is comparing old vs. new state for rows that
-// already exist, which doesn't apply here.
+// Ensures a PracticeSchedule row exists for every 'Needs Practice' competency
+// — without it, a newly-weak competency has no schedule and silently never
+// shows in Due Today. Only creates missing rows; called before reconcile,
+// which handles rows that already exist.
 export async function ensurePracticeSchedulesForWeakCompetencies(
   studentId: string,
   studentName: string,
@@ -117,18 +98,9 @@ export async function ensurePracticeSchedulesForWeakCompetencies(
 }
 
 // Reconciles existing PracticeSchedule rows against a new formal diagnostic
-// re-assessment. Called once, right after the diagnostic's EvaluationReport
-// is persisted (the formal diagnostic-submit route only — the ICR bulk-scan
-// and worksheet-submit routes also create EvaluationReports but are NOT
-// formal re-assessments in this sense, and are not hooked here). Never
-// creates schedules — that stays getOrInitPracticeSchedule's job at
-// generation time; this only updates ones that already exist.
-//
-// previousCurrentLevel/newCurrentLevel are student.currentLevel before/after
-// this diagnostic, on the 93-entry FLN_LEVELS_LIST scale — NOT the same
-// numbering as PracticeSchedule.currentLevelId (the 59-id levels_main.html
-// scale used by mapCompetencyToLevel below). The two scales are only ever
-// compared against each other (via class band), never against currentLevelId.
+// re-assessment (not ICR/worksheet-submit reports). previousCurrentLevel/
+// newCurrentLevel are on the 93-entry scale — never compared directly
+// against currentLevelId's 59-id scale, only via class band.
 export async function reconcilePracticeSchedulesWithDiagnostic(
   studentId: string,
   studentName: string,
@@ -141,21 +113,15 @@ export async function reconcilePracticeSchedulesWithDiagnostic(
   const studentSchedules = schedules.filter(s => s.studentId === studentId);
   if (studentSchedules.length === 0) return;
 
-  // Normalize conceptMastery's own keys first (e.g. the diagnostic route can
-  // emit a typo'd/loosely-named topic instead of the canonical competency
-  // name) — otherwise a schedule whose competency is already canonical never
-  // matches a differently-spelled key here, even though
-  // ensurePracticeSchedulesForWeakCompetencies (above) already normalizes in
-  // the other direction when creating schedules from these same keys.
+  // Normalize conceptMastery's keys too, so a canonical schedule competency
+  // still matches a differently-spelled key.
   const normalizedMastery: { [competency: string]: 'Strong' | 'Needs Practice' | 'Satisfactory' } = {};
   for (const [raw, value] of Object.entries(conceptMastery)) {
     normalizedMastery[normalizeCompetencyName(raw)] = value;
   }
 
-  // The 93-level scale is organized in ~10-level "class bands" (Preschool
-  // 1/2/3, Class 1/2/3/4) — crossing a band means the student's overall
-  // placement moved into meaningfully different grade-level material, not
-  // just a small nudge within the same band.
+  // Crossing a ~10-level class band means the student moved into
+  // meaningfully different grade-level material, not just a small nudge.
   const previousBand = Math.floor((previousCurrentLevel - 1) / 10);
   const newBand = Math.floor((newCurrentLevel - 1) / 10);
   const crossedClassBand = previousBand !== newBand;

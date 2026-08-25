@@ -147,10 +147,8 @@ export interface Question {
   source_level: number; // Mapping to mathematical level
   conceptId?: string; // Concept ID from 93-node framework (e.g. S1.1, S3.3)
   svgAsset?: string; // Standard pre-built SVG asset category
-  // For 'visual-confirm' questions: the deterministically-rendered SVG
-  // showing what the correct drawing should look like (e.g. tally marks for
-  // the stored correctAnswer count), shown next to the student's uploaded
-  // photo so the teacher can judge match/no-match instead of typing a value.
+  // For 'visual-confirm' questions: rendered SVG of the correct drawing,
+  // shown beside the student's photo for teacher match/no-match judgment.
   referenceImageSvg?: string;
 }
 
@@ -398,13 +396,8 @@ export interface PracticeSchedule {
   teacherId: string;
   competency: string;
   intervalDays: number;
-  // The student's exact real-content position for this competency, in the
-  // 59-level micro-practice system (levels_main.html's LEVELS array — see
-  // flnLevels.ts). Optional because schedules written before this field
-  // existed won't have it; getOrInitPracticeSchedule (index.ts) backfills
-  // any schedule missing it back to the strand's easiest level, subIdx 0,
-  // rather than trust a currentSubLevel value that was never validated
-  // against a specific level.
+  // Student's real position for this competency in the 59-level system
+  // (flnLevels.ts). Optional for legacy schedules — getOrInitPracticeSchedule backfills those.
   currentLevelId?: number;
   currentSubIdx?: number;  // subIdx within currentLevelId — defaults to 0 for new schedules; range depends on the level (see getSubsCountForLevel), no longer a fixed 0-2 cap
   resolved?: boolean;      // true once the student clears the last subIdx of the last level in the competency's strand with a good score — no further real content exists
@@ -426,17 +419,10 @@ export interface MicroAssignment {
   totalCount: number;
 }
 
-/**
- * One printed micro-practice paper's real, generation-time answer key.
- * generateMicroSet's generators are randomized (Math.random(), no seeding),
- * so the questions/answers actually printed on the paper can't be safely
- * reconstructed by calling generateMicroSet again later — this record is
- * what the manual answer-entry flow reads from instead. id is embedded in
- * the paper's QR code so an uploaded photo can be matched back to the
- * exact paper it came from (not just "a" paper matching the same
- * student/level/section, which spaced repetition can regenerate more than
- * once).
- */
+// generateMicroSet is unseeded, so a paper's printed content can't be
+// reconstructed later — MicroPracticePaper is the persisted record graded
+// against instead, keyed by the paperId embedded in its QR.
+
 /**
  * One "Part N: <competency>" section within a multi-competency
  * micro-practice paper (see generateMultiCompetencyMicroPaper).
@@ -461,12 +447,8 @@ export interface MicroPracticePaper {
   // per printed "Part N: <competency>" section.
   parts?: MicroPracticePart[];
 
-  // Legacy single-competency shape (generateMicroPracticePaper /
-  // POST /api/students/:id/micro-practice/generate-pdf). Populated only
-  // when `parts` is absent — kept exactly as before so the existing GET
-  // /api/practice/paper/:paperId route and MicroPracticeAnswerEntry.tsx
-  // continue to work unchanged. Migrating those to read `parts` uniformly
-  // for both cases is a follow-up, not part of this change.
+  // Legacy single-competency shape, populated only when `parts` is absent.
+  // Migrating both to read `parts` uniformly is a follow-up.
   competency?: string | null;
   levelId?: number;
   subIdx?: number;
@@ -475,16 +457,9 @@ export interface MicroPracticePaper {
   questions?: Question[];
 }
 
-/**
- * Tracks a photographed/scanned completed micro-practice paper from the
- * moment it's uploaded until it's fully graded. POST /api/practice/upload-paper
- * used to just save the image and echo the QR payload back with no persisted
- * record — this is that missing record, so teachers can leave an uploaded
- * paper ungraded and come back to it later (GET /api/practice/pending-papers).
- * totalParts/gradedCompetencies track multi-competency papers so the record
- * only flips to 'graded' once every part has been submitted, not after the
- * first one.
- */
+// Tracks an uploaded micro-practice paper from upload until fully graded, so
+// a teacher can leave it ungraded and resume later. totalParts/gradedCompetencies
+// keep multi-part papers from flipping to 'graded' until every part is submitted.
 export interface UploadedPaper {
   id: string;
   paperId: string;
@@ -1706,19 +1681,15 @@ export class DBStore {
     return p || undefined;
   }
 
-  // Sorted by uploadedAt desc so that if duplicate records for the same
-  // paperId ever exist (e.g. legacy rows written before duplicate-upload
-  // handling existed), this deterministically returns the most recent one
-  // instead of an arbitrary Mongo-natural-order match.
+  // Sorted by uploadedAt desc so duplicate records for the same paperId
+  // deterministically resolve to the most recent one.
   async getUploadedPaperByPaperId(paperId: string) {
     const p = await this.mongoDb!.collection<UploadedPaper>('uploadedPapers').findOne({ paperId }, { sort: { uploadedAt: -1 } });
     return p || undefined;
   }
 
-  // Batched version of getUploadedPaperByPaperId for the duplicate-upload
-  // pre-flight check — one round trip for N paperIds instead of N. Returns
-  // at most one record per paperId (the most recent), same tie-break as
-  // above.
+  // Batched version of getUploadedPaperByPaperId — one round trip for N
+  // paperIds instead of N.
   async getUploadedPapersByPaperIds(paperIds: string[]) {
     const all = await this.mongoDb!.collection<UploadedPaper>('uploadedPapers')
       .find({ paperId: { $in: paperIds } })

@@ -10,10 +10,8 @@ interface Props {
     userRole: UserRole;
 }
 
-// Sentinel activeGroupKey value meaning "every pending paper, across all
-// class+date groups" — used by "Grade All". getGroupKeyForPaper's real
-// return shapes (`${date}__${class}::${section}` or `solo:${id}`) can never
-// collide with this.
+// Sentinel activeGroupKey meaning "every pending paper" (used by Grade All)
+// — can't collide with getGroupKeyForPaper's real return shapes.
 const ALL_PAPERS_KEY = '__all__';
 
 const ALL_COMPETENCIES = [
@@ -77,11 +75,9 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
     const [studentCompetencyOptions, setStudentCompetencyOptions] = useState<string[]>([]);
     const [showUploadPaper, setShowUploadPaper] = useState(false);
     const [identifiedPaper, setIdentifiedPaper] = useState<any | null>(null);
-    // The class+date group key (see getGroupKeyForPaper) shared by every
-    // paper in the group currently being graded, or null when viewing a
-    // standalone paper. Group membership itself is always derived live from
-    // pendingPapers (see activeBatchSiblings below) rather than snapshotted
-    // here, so it shrinks automatically as students get graded.
+    // Group key (getGroupKeyForPaper) shared by papers being graded together,
+    // or null standalone. Derived live from pendingPapers, not snapshotted,
+    // so it shrinks as students get graded.
     const [activeGroupKey, setActiveGroupKey] = useState<string | null>(null);
     const [pendingPapers, setPendingPapers] = useState<any[]>([]);
     const [loadingPending, setLoadingPending] = useState(true);
@@ -89,10 +85,8 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
 
     const [generateMode, setGenerateMode] = useState<GeneratePanelMode>('none');
 
-    // Class filter for the generate-paper picker — null means "All Classes".
-    // Derived from and applied to the already-fetched `students` list (see
-    // classOptions/filteredStudents below); persists across the Individual/
-    // Bulk sub-screens once chosen, until the panel is closed/backed out of.
+    // Class filter for the generate-paper picker (null = All Classes);
+    // persists across Individual/Bulk sub-screens until the panel closes.
     const [selectedClassKey, setSelectedClassKey] = useState<string | null>(null);
 
     // Individual-student generate flow
@@ -109,10 +103,8 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
     const [bulkError, setBulkError] = useState<string | null>(null);
     const [bulkJob, setBulkJob] = useState<BulkJob | null>(null);
 
-    // The "Due Today" class-group currently queued for a bulk-generate quick
-    // launch (bulkSubMode 'due-today'), or null otherwise. Holds each due
-    // student's ACTUAL due competencies, scoped down from their full
-    // weak-competency list via studentCompetencyOverrides.
+    // Due-today class-group queued for bulk-generate quick launch; holds each
+    // student's actual due competencies (not their full weak-competency list).
     const [dueBulkGroup, setDueBulkGroup] = useState<DueBulkGroup | null>(null);
 
     const fetchDueList = async () => {
@@ -303,12 +295,9 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
         setBulkSubMode('entire-class');
     };
 
-    // Quick-launches the bulk-generate panel straight into a pre-scoped
-    // confirm screen for either a whole class's or a single student's worth
-    // of today's due students — bypasses the Individual/Bulk picker (and,
-    // for a single student, the single-competency individual-generate form)
-    // entirely, since the student+competency list is already known from the
-    // due-schedule grouping below.
+    // Quick-launches bulk-generate straight into a pre-scoped confirm screen
+    // for a class/student's due students, bypassing the Individual/Bulk picker
+    // entirely since that list is already known from due-schedule grouping.
     const triggerDueBulkGenerate = (targetLabel: string, students: DueBulkGroup['students']) => {
         setDueBulkGroup({ targetLabel, students });
         setBulkError(null);
@@ -370,12 +359,9 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
         );
     };
 
-    // Starts an async bulk-generation job and stores its initial state; the
-    // polling useEffect above takes over from here. Used by all three bulk
-    // sub-modes — they only differ in which studentIds they pass in, and the
-    // due-today flow additionally scopes each student down to just their
-    // actually-due competencies via studentCompetencyOverrides (omitted
-    // entirely for manual/entire-class, which keep pulling full weak lists).
+    // Starts an async bulk-generation job; the polling useEffect above takes
+    // over from here. Shared by all three bulk sub-modes — due-today alone
+    // scopes each student to their actually-due competencies.
     const handleBulkGenerate = async (studentIds: string[], studentCompetencyOverrides?: Record<string, string[]>) => {
         if (studentIds.length === 0) return;
         setBulkGenerating(true);
@@ -415,12 +401,9 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
         }
     };
 
-    // Opens a previously-uploaded, still-pending paper directly in the
-    // grading screen. MicroPracticeAnswerEntry only strictly needs
-    // paperId/studentId/studentName/imageUrl from this object — it fetches
-    // the real question content by paperId itself, so the remaining
-    // IdentifiedPaper fields (levelId/subIdx/competency) can be left
-    // unset/null here exactly as they already are for the multi-part case.
+    // Opens a pending paper directly in the grading screen — the screen
+    // fetches real question content by paperId, so levelId/subIdx/competency
+    // can stay unset here.
     const openPendingPaper = (p: any) => {
         setIdentifiedPaper({
             paperId: p.paperId,
@@ -431,11 +414,8 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
         });
     };
 
-    // Moves to the sibling paper at `offset` positions away within the
-    // currently-active batch (e.g. -1 for Previous, +1 for Next). No-ops at
-    // either end rather than wrapping. Does not save any in-progress typed
-    // answers on the paper being left — matches the existing behavior, where
-    // "Save & Grade Later" is the only explicit way to persist a draft.
+    // Moves to the sibling paper `offset` positions away (-1 Previous, +1
+    // Next) in the active batch; no-ops at either end rather than wrapping.
     const goToBatchSibling = (offset: number) => {
         if (!activeGroupKey || !identifiedPaper) return;
         const siblings = getActiveGroupSiblings();
@@ -446,14 +426,9 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
         openPendingPaper(siblings[targetIndex]);
     };
 
-    // Fires when MicroPracticeAnswerEntry's onDone callback resolves.
-    // 'closed' (the header × button, or a successful Save & Grade Later)
-    // always returns to the pending-papers list. 'graded' (the results
-    // screen's Done button, after a successful submit) auto-advances to the
-    // next still-ungraded paper in the same batch if one remains — pulled
-    // live from pendingPapers (excluding the paper just graded) rather than
-    // waiting on the fetchPendingPapers() refetch below, which resolves
-    // asynchronously.
+    // 'closed' returns to the pending-papers list; 'graded' auto-advances to
+    // the next ungraded paper in the batch (read live, not via the refetch
+    // below, which resolves asynchronously).
     const handleAnswerEntryDone = (reason: 'closed' | 'graded') => {
         setShowUploadPaper(false);
         fetchDueList();
@@ -471,11 +446,8 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
         setActiveGroupKey(null);
     };
 
-    // Classes derived from the already-fetched student list's own
-    // classGroup+section pairs — not from User/ClassGroup, which aren't a
-    // reliable signal for "this teacher's classes": ClassGroup.teacherId is
-    // inconsistently populated, and /api/students scopes teachers by
-    // schoolId, not teacherId.
+    // Classes derived from the fetched students' own classGroup+section, not
+    // from User/ClassGroup — ClassGroup.teacherId is unreliable here.
     const classOptions = students.reduce((acc: { key: string; className: string; section: string }[], s) => {
         const className = s.classGroup || 'Unknown';
         const section = s.section || '';
@@ -492,32 +464,24 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
         ? students.filter(s => `${s.classGroup || 'Unknown'}::${s.section || ''}` === selectedClassKey)
         : students;
 
-    // Looks up a student's class for the badges on Papers Awaiting Grading /
-    // Due Today. Returns null if the student can't be found (e.g. students
-    // hasn't loaded yet, or the student no longer exists) — callers treat
-    // that as "no badge" rather than showing a placeholder.
+    // Looks up a student's class for badges on Papers Awaiting Grading / Due
+    // Today; null (no badge) if the student can't be found.
     const getStudentClass = (studentId: string) => {
         const s = students.find(st => st.id === studentId);
         return s ? { className: s.classGroup || 'Unknown', section: s.section || '' } : null;
     };
 
-    // Groups papers on Papers Awaiting Grading by class+upload-date rather
-    // than by upload batch — all papers for the same class uploaded on the
-    // same day belong together regardless of which upload action created
-    // them. Falls back to a per-paper unique key when the student's class
-    // can't be resolved, so such a paper renders standalone instead of being
-    // merged into a false "unknown class" bucket.
+    // Groups papers by class+upload-date rather than upload batch. Falls back
+    // to a per-paper unique key when the class can't be resolved, so it
+    // renders standalone instead of joining a false "unknown class" bucket.
     const getGroupKeyForPaper = (p: any): string => {
         const cls = getStudentClass(p.studentId);
         const dateKey = new Date(p.uploadedAt).toLocaleDateString();
         return cls ? `${dateKey}__${cls.className}::${cls.section}` : `solo:${p.id}`;
     };
 
-    // Flattens pendingPapers into the exact linear order the "Papers Awaiting
-    // Grading" list below renders them in (date groups newest-first, then
-    // class-batches in the same first-encountered order that render's own
-    // grouping produces) — used by "Grade All" so Next/Previous matches "the
-    // next one down the visual list," not an arbitrary fetch order.
+    // Flattens pendingPapers into the exact visual order the render below
+    // uses, so "Grade All" Next/Previous matches the list, not fetch order.
     const getVisualPendingOrder = (): any[] => {
         const dateGroups = Object.values(
             pendingPapers.reduce((groups: Record<string, { dateKey: string; timestamp: number; papers: any[] }>, p) => {
@@ -544,21 +508,17 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
         return ordered;
     };
 
-    // Resolves the sibling list for whatever activeGroupKey currently means —
-    // one specific class+date group, or (ALL_PAPERS_KEY) every pending paper
-    // in visual order. Used by Previous/Next, the batchNav position/total,
-    // and the graded-auto-advance logic, so all three stay in sync.
+    // Sibling list for activeGroupKey — one class+date group, or every
+    // pending paper if ALL_PAPERS_KEY. Keeps Previous/Next, batchNav, and
+    // auto-advance in sync.
     const getActiveGroupSiblings = (): any[] => {
         if (!activeGroupKey) return [];
         if (activeGroupKey === ALL_PAPERS_KEY) return getVisualPendingOrder();
         return pendingPapers.filter(p => getGroupKeyForPaper(p) === activeGroupKey);
     };
 
-    // A student can have more than one pending paper in the same class+date
-    // group (uploaded separately, different paperIds) — list their name once
-    // with a "(N)" count suffix instead of repeating it. The underlying
-    // papers array is untouched, so click-to-grade Previous/Next navigation
-    // still reaches every paper.
+    // A student can have multiple pending papers in the same group — list
+    // their name once with a "(N)" suffix instead of repeating it.
     const formatGroupNames = (papers: any[]): string => {
         const counts = new Map<string, number>();
         for (const p of papers) counts.set(p.studentName, (counts.get(p.studentName) || 0) + 1);
@@ -567,13 +527,9 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
             .join(', ');
     };
 
-    // Due Today / Overdue grouping. /api/practice/due only ever returns items
-    // with nextDueDate <= now, so there is no future-due date to distinguish —
-    // every item is already "due today or overdue," which is why this merges
-    // straight into per-student, then per-class groups with no date axis at
-    // all (no past-dated groups are ever shown). Students getStudentClass
-    // can't resolve (e.g. still loading) fall into a single "Unassigned"
-    // bucket rather than disappearing from the list.
+    // /api/practice/due only returns nextDueDate <= now, so there's no date
+    // axis to group by — just per-student then per-class. Unresolvable
+    // classes fall into "Unassigned" rather than disappearing.
     const dueClassGroups = useMemo(() => {
         const studentGroups = Object.values(
             dueList.reduce((acc: Record<string, { studentId: string; studentName: string; competencies: string[]; items: any[] }>, item) => {
@@ -845,7 +801,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                         <div className="space-y-3">
                             <div className="flex items-center justify-between">
                                 <h3 className="text-lg font-display font-medium text-zinc-900 dark:text-white">
-                                    Bulk Generate — Whole Class
+                                    Bulk Generate Papers
                                 </h3>
                                 <button type="button" onClick={backToPicker} className="text-xs font-bold text-indigo-600 hover:underline">
                                     ← Back
@@ -874,7 +830,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                                     className="flex flex-col items-center text-center bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 rounded-lg p-4"
                                 >
                                     <div className="font-medium text-sm text-zinc-800 dark:text-zinc-100">Generate for Entire Class</div>
-                                    <div className="text-xs text-zinc-500 mt-0.5">One click — includes every student in your roster</div>
+                                    <div className="text-xs text-zinc-500 mt-0.5">One click - includes every student in your roster</div>
                                 </button>
                             </div>
                         </div>
@@ -1173,7 +1129,7 @@ export const MicroPractice: React.FC<Props> = ({ token, userRole }) => {
                     </div>
                     {!loadingPending && pendingPapers.length === 0 && (
                         <div className="absolute inset-0 flex items-center justify-center text-center text-zinc-400 text-sm px-10">
-                            No papers waiting to be graded. Upload a completed paper above to get started.
+                            No papers waiting to be graded. Upload a completed paper to get started.
                         </div>
                     )}
                     <div className="h-[256px] overflow-y-auto pr-1.5 custom-scrollbar">
@@ -1382,12 +1338,8 @@ interface StudentProgressChartProps {
     token: string;
 }
 
-// Direct port of the exported "Progress Chart" design: a multi-line area
-// chart of score-over-time, one line per competency the selected student has
-// practiced, with dashed gap connectors across sessions where a given
-// competency wasn't attempted. Class/Student dropdowns scope which single
-// student's history is plotted — there is no separate class-aggregate view
-// in this design (replaces the old Student/Class toggle + ranked bar chart).
+// Multi-line score-over-time chart, one line per practiced competency, with
+// dashed gap connectors across unattempted sessions. No class-aggregate view.
 const StudentProgressChart: React.FC<StudentProgressChartProps> = ({ progressData, students, token }) => {
     const [classKey, setClassKey] = useState<string | null>(null); // null = "All Classes"
     const [studentId, setStudentId] = useState('');
@@ -1449,10 +1401,8 @@ const StudentProgressChart: React.FC<StudentProgressChartProps> = ({ progressDat
         return () => { cancelled = true; };
     }, [effectiveStudentId, token]);
 
-    // Shared X-axis = the sorted union of distinct practice-session dates
-    // across every competency this student has attempted; each competency's
-    // series is null at any date it wasn't practiced on, which is what
-    // produces the gap connectors below.
+    // Shared X-axis: sorted union of practice dates; a series is null on
+    // dates its competency wasn't practiced, producing the gap connectors.
     const { dateKeys, seriesByCompetency } = useMemo(() => {
         const dateKeySet = new Set<string>();
         history.forEach(h => dateKeySet.add(h.completedAt.slice(0, 10)));
@@ -1494,13 +1444,8 @@ const StudentProgressChart: React.FC<StudentProgressChartProps> = ({ progressDat
                 areas.push(`${d} L ${pts[pts.length - 1][0]} ${BOTTOM} L ${pts[0][0]} ${BOTTOM} Z`);
             });
 
-            // Gaps connect the last real point of one run to the first real
-            // point of the next with a straight (dashed, no-interpolation)
-            // segment — both endpoints are always real data points, only the
-            // stretch between them lacks a result. gapAreas fills underneath
-            // that same straight segment with the identical gradient used for
-            // solid areas, so the shading stays visually consistent across
-            // gap/non-gap sections without implying any data exists in between.
+            // Gaps connect adjacent runs with a straight dashed segment; both
+            // endpoints are real data points, only the stretch between isn't.
             const gaps: string[] = [];
             const gapAreas: string[] = [];
             for (let r = 0; r < runs.length - 1; r++) {

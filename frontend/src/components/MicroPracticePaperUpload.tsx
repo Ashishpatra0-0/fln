@@ -116,13 +116,9 @@ async function decodeQrFromImageDataUrl(dataUrl: string): Promise<DecodedPayload
     return payload as DecodedPayload;
 }
 
-// Builds the candidate list for a selected file. Images always produce at
-// most one candidate. PDFs are rasterized page-by-page (allPages: true) and
-// EVERY page is tried — a single PDF can contain multiple different
-// students' papers, one per page — so there's no early stop on first match.
-// Pages that decode to the SAME paperId (a multi-page paper now prints the
-// identical QR on every page) are merged into a single candidate below,
-// rather than being treated as separate papers.
+// Builds the candidate list for a selected file. PDFs are rasterized
+// page-by-page and every page tried (a PDF can hold multiple students'
+// papers); pages sharing the same paperId are merged into one candidate.
 async function buildCandidatesFromFile(
     file: File,
     token: string
@@ -197,10 +193,8 @@ export const MicroPracticePaperUpload: React.FC<Props> = ({ token, onPaperIdenti
     const [fileBatches, setFileBatches] = useState<FileBatch[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // Blocks handleConfirmUploadAll mid-flight until the teacher answers the
-    // replace-duplicates dialog. Set while still in stage 'reviewing' —
-    // rendered as a full takeover of the panel body (see below) rather than
-    // a separate overlay, so no z-index/portal machinery is needed.
+    // Blocks handleConfirmUploadAll until the teacher answers the
+    // replace-duplicates dialog, rendered as a full takeover (no portal needed).
     const [confirmReplace, setConfirmReplace] = useState<{ names: string[] } | null>(null);
     const confirmReplaceResolver = useRef<((accepted: boolean) => void) | null>(null);
 
@@ -259,17 +253,8 @@ export const MicroPracticePaperUpload: React.FC<Props> = ({ token, onPaperIdenti
         if (next.length === 0) setStage('idle');
     };
 
-    // Uploads every candidate across every batch sequentially, isolating
-    // failures per-candidate (one bad page doesn't block the rest).
-    // Preserves the original single-paper fast path exactly: if there's
-    // only one candidate total and it uploads successfully, hand off
-    // immediately with no extra summary screen.
-    //
-    // Before any image is actually uploaded, checks every decoded paperId
-    // against existing UploadedPaper records (see check-duplicates on the
-    // backend): a duplicate of an already-graded paper is skipped with an
-    // inline message; a duplicate of a still-pending paper pauses here for
-    // a yes/no from the teacher (askConfirmReplace) before continuing.
+    // Uploads every candidate sequentially; checks paperIds against existing
+    // UploadedPaper records first (graded duplicates skip, pending ones ask via askConfirmReplace).
     const handleConfirmUploadAll = async () => {
         const flatWork = fileBatches.flatMap(b =>
             b.candidates.map((c, candidateIndex) => ({ batchId: b.id, candidateIndex, candidate: c }))
@@ -338,10 +323,8 @@ export const MicroPracticePaperUpload: React.FC<Props> = ({ token, onPaperIdenti
             }
         }
 
-        // Nothing left to upload — every candidate was either already graded
-        // (silent skip) or a duplicate the teacher chose not to replace.
-        // There's nothing to review, so close the whole panel instead of
-        // landing on a 'done' screen that only has a Close button on it.
+        // Everything was skipped/declined — close the panel instead of
+        // landing on a 'done' screen with nothing to review.
         if (proceedWork.length === 0) {
             onCancel();
             return;
@@ -349,10 +332,8 @@ export const MicroPracticePaperUpload: React.FC<Props> = ({ token, onPaperIdenti
 
         setStage('uploading');
 
-        // Shared across every candidate uploaded in this one confirm action, so
-        // the pending-grading list can later group them as one bulk-uploaded
-        // batch (see MicroPractice.tsx) instead of by upload timestamp, which
-        // drifts too much under real network latency to match reliably.
+        // Shared by every candidate in this confirm action, so the
+        // pending-grading list can group them by batch, not drifting timestamps.
         const uploadBatchId = `batch_${Date.now()}_${Math.random().toString(36).slice(2)}`;
         const finalResults: PageCandidate[] = [];
 
