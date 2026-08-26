@@ -350,7 +350,7 @@ async function startServer() {
         levelId,
         subIdx,
         sectionIndex: Number(sectionIndex),
-        questionCount: Number(questionCount),
+        questionCount: result.questions.length,
         questions: result.questions,
         pdfUrl: result.pdfUrl,
         createdAt: new Date().toISOString()
@@ -781,6 +781,19 @@ async function startServer() {
     }
   });
 
+  // Interval multiplier from up to the last 3 scores (current + up to 2 prior),
+  // reflecting how consistently the student has hit this tier — approximates
+  // Half-Life Regression's use of practice history instead of just the latest score.
+  function intervalFactorFromHistory(
+    scorePercent: number,
+    recentScorePercents: number[],
+    inTier: (p: number) => boolean
+  ): number {
+    const window = [scorePercent, ...recentScorePercents].slice(0, 3);
+    if (window.length < 2 || !window.every(inTier)) return 1.5;
+    return window.length >= 3 ? 3 : 2.5;
+  }
+
   // Three-tier scoring against real levelId/subIdx: >=80% advances subIdx
   // (or the next strand level, or resolves if none left); 50-79% holds;
   // <50% halves the interval. Interval only grows on success, shrinks on failure, never on a hold.
@@ -789,12 +802,14 @@ async function startServer() {
     currentLevelId: number,
     currentSubIdx: number,
     correctCount: number,
-    totalCount: number
+    totalCount: number,
+    recentScorePercents: number[] = []
   ): { intervalDays: number; levelId: number; subIdx: number; resolved: boolean } {
     const scorePercent = totalCount > 0 ? (correctCount / totalCount) * 100 : 0;
 
     if (scorePercent >= 80) {
-      const intervalDays = Math.min(30, currentIntervalDays * 2);
+      const factor = intervalFactorFromHistory(scorePercent, recentScorePercents, p => p >= 80);
+      const intervalDays = Math.min(30, Math.round(currentIntervalDays * factor));
       const subsInLevel = getSubsCountForLevel(currentLevelId) ?? 1;
 
       if (currentSubIdx + 1 < subsInLevel) {
@@ -811,7 +826,9 @@ async function startServer() {
       return { intervalDays: currentIntervalDays, levelId: currentLevelId, subIdx: currentSubIdx, resolved: false };
     }
 
-    return { intervalDays: Math.max(1, Math.floor(currentIntervalDays / 2)), levelId: currentLevelId, subIdx: currentSubIdx, resolved: false };
+    const factor = intervalFactorFromHistory(scorePercent, recentScorePercents, p => p < 50);
+    const intervalDays = Math.max(1, Math.round(currentIntervalDays / factor));
+    return { intervalDays, levelId: currentLevelId, subIdx: currentSubIdx, resolved: false };
   }
 
 
@@ -1003,6 +1020,16 @@ async function startServer() {
 
     const now = new Date().toISOString();
 
+    // Prior attempts for this student+competency, newest-first, for the
+    // interval's history-based factor — fetched before this attempt is added.
+    const priorAssignments = (await dbStore.getMicroAssignments())
+      .filter(a => a.studentId === studentId && a.competency === competency && a.completedAt)
+      .sort((a, b) => new Date(b.completedAt!).getTime() - new Date(a.completedAt!).getTime())
+      .slice(0, 2);
+    const recentScorePercents = priorAssignments.map(a =>
+      a.totalCount > 0 ? ((a.correctCount || 0) / a.totalCount) * 100 : 0
+    );
+
     const assignment: MicroAssignment = {
       id: 'ma_' + randomUUID().slice(0, 8),
       scheduleId: schedule.id,
@@ -1024,7 +1051,8 @@ async function startServer() {
       schedule.currentLevelId!,
       schedule.currentSubIdx || 0,
       correctCount,
-      questions.length
+      questions.length,
+      recentScorePercents
     );
     const nextDue = nextDueDateIST(new Date(), nextState.intervalDays);
     await dbStore.updatePracticeSchedule(schedule.id, {

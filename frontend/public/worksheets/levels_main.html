@@ -798,7 +798,7 @@ const OPPOSITES=[["Tall","Short"],["Big","Small"],["Hot","Cold"],["Up","Down"],[
 const SHAPE_MATCH=[["Ball","circle"],["Dice","square"],["Slice","triangle"],["Book","rectangle"],["Sign","pentagon"]];
 const RELATION_MATCH=[["Dog","Puppy"],["Cat","Kitten"],["Cow","Calf"],["Fish","Water"],["Bird","Nest"],["Bee","Hive"]];
 const SIZE_DIFF_PAIRS=[{big:'elephant',bigLabel:'Elephant',small:'ant',smallLabel:'Ant'},{big:'tv',bigLabel:'TV',small:'pencil',smallLabel:'Pencil'},{big:'bus',bigLabel:'Bus',small:'ball',smallLabel:'Ball'},{big:'house',bigLabel:'House',small:'key',smallLabel:'Key'},{big:'tree',bigLabel:'Tree',small:'flower',smallLabel:'Flower'}];
-const RELATION_SIZE_PAIRS=[{icon:'dog',bigLabel:'Mother Dog',smallLabel:'Puppy'},{icon:'bird',bigLabel:'Hen',smallLabel:'Chick'},{icon:'cow',bigLabel:'Cow',smallLabel:'Calf'},{icon:'cat',bigLabel:'Cat',smallLabel:'Kitten'},{icon:'elephant',bigLabel:'Elephant',smallLabel:'Baby Elephant'}];
+const RELATION_SIZE_PAIRS=[{icon:'dog',bigLabel:'Mother Dog',smallLabel:'Puppy'},{icon:'bird',bigLabel:'Hen',smallLabel:'Chick'},{icon:'cow',bigLabel:'Cow',smallLabel:'Calf'},{icon:'cat',bigLabel:'Cat',smallLabel:'Kitten'},{icon:'elephant',bigLabel:'Elephant',smallLabel:'Baby Elephant'},{icon:'lion',bigLabel:'Lion',smallLabel:'Cub'},{icon:'bear',bigLabel:'Bear',smallLabel:'Cub'},{icon:'duck',bigLabel:'Duck',smallLabel:'Duckling'},{icon:'frog',bigLabel:'Frog',smallLabel:'Tadpole'},{icon:'monkey',bigLabel:'Monkey',smallLabel:'Baby Monkey'},{icon:'rabbit',bigLabel:'Rabbit',smallLabel:'Bunny'}];
 const THREE_SIZE_THEMES=[
   {kind:'icon',icon:'tree',label:'Tree'},
   {kind:'icon',icon:'umbrella',label:'Umbrella'},
@@ -1008,18 +1008,27 @@ const GENERATORS = {};
 GENERATORS['compare-equal-match'] = (p,subIdx,qc,sid,sname) => {
   const n = p.n || (subIdx===0?4:3);
   const theme = p.theme || randomTheme();
-  let counts=[]; while(counts.length<n){ const c=ri(2,8); if(!counts.includes(c)) counts.push(c); }
-  const iconsUsed=[]; counts.forEach(()=>{ let ic; do{ ic=themeIcon(theme); }while(iconsUsed.includes(ic)); iconsUsed.push(ic); });
-  const countToIcon={}; counts.forEach((c,i)=>countToIcon[c]=iconsUsed[i]);
-  const rightOrder = shuffle(counts);
+  // Each row is a unique (icon,count) PAIR rather than a unique count alone —
+  // supports n beyond the old 7-value count range (icons x 7 possible pairs).
+  const usedPairs = new Set();
+  const pairs = [];
+  while (pairs.length < n) {
+    const count = ri(2,8);
+    const icon = themeIcon(theme);
+    const key = icon + '|' + count;
+    if (usedPairs.has(key)) continue;
+    usedPairs.add(key);
+    pairs.push({ icon, count });
+  }
+  const rightOrder = shuffle(pairs.map((_, i) => i));
   let leftItems='', rightItems='', answers=[];
-  counts.forEach((c,i)=>{
+  pairs.forEach((pair,i)=>{
     const qid=qidOf(qc);
-    const rightCount = rightOrder[i];
+    const rightPair = pairs[rightOrder[i]];
     const rightLetter = String.fromCharCode(65 + i); // A, B, C, ... one per right-column row
-    leftItems+=`<div class="match-item"><span class="match-label">${i+1}</span><div class="match-content">${iconRow(countToIcon[c],c,26)}</div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    rightItems+=`<div class="match-item"><span class="match-dot" data-omr="${qid}-rightdot"></span><div class="match-content">${iconRow(countToIcon[rightCount],rightCount,26)}</div><span class="match-label">${rightLetter}</span></div>`;
-    const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(c));
+    leftItems+=`<div class="match-item"><span class="match-label">${i+1}</span><div class="match-content">${iconRow(pair.icon,pair.count,26)}</div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
+    rightItems+=`<div class="match-item"><span class="match-dot" data-omr="${qid}-rightdot"></span><div class="match-content">${iconRow(rightPair.icon,rightPair.count,26)}</div><span class="match-label">${rightLetter}</span></div>`;
+    const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the left dot to the right dot with the same object & count`, ICR_DETECT_MAP['match-line']));
   });
   return {
@@ -1078,9 +1087,15 @@ GENERATORS['size-comparison-visual'] = (p,subIdx,qc,sid,sname) => {
 };
 
 GENERATORS['relation-comparison'] = (p,subIdx,qc,sid,sname) => {
-  const n = p.n || (subIdx===0?4:3);
+  const requestedN = p.n || (subIdx===0?4:3);
+  // RELATION_SIZE_PAIRS is a curated list of real adult/baby animal-name
+  // pairs, not a combinable parameter space (unlike compare-equal-match's
+  // icon x count) — so instead of cycling back through the pool and risking
+  // repeats, cap at its real size and say so, rather than duplicate silently.
+  const n = Math.min(requestedN, RELATION_SIZE_PAIRS.length);
+  const wasCapped = requestedN > RELATION_SIZE_PAIRS.length;
   const hardCount = p.hardCount!==undefined ? p.hardCount : 0;
-  const pairs = sampleCycled(RELATION_SIZE_PAIRS, n);
+  const pairs = sample(RELATION_SIZE_PAIRS, n);
   let rows='', answers=[];
   pairs.forEach((pr,i)=>{
     const qid=qidOf(qc);
@@ -1096,7 +1111,10 @@ GENERATORS['relation-comparison'] = (p,subIdx,qc,sid,sname) => {
       <span class="circle-target" data-omr="${qid}-right" style="flex-direction:column;">${icon(pr.icon,rightSize)}<span style="font-size:11px;margin-top:2px;">${esc(rightLabel)}</span></span></div>`;
     answers.push(makeAnsItem(qid,sid,sname,i+1,'circle-choice',correct,`circle the BIGGER (adult) one (${correct})`,ICR_DETECT_MAP['circle-choice']));
   });
-  return {html:`<p class="instr">Circle the BIGGER animal in each pair (the grown-up one).</p><div class="q-list">${rows}</div>`, answers};
+  const cappedNote = wasCapped
+    ? `<p class="instr" style="font-style:italic;">Only ${RELATION_SIZE_PAIRS.length} unique animal comparisons are available — showing all ${RELATION_SIZE_PAIRS.length}.</p>`
+    : '';
+  return {html:`<p class="instr">Circle the BIGGER animal in each pair (the grown-up one).</p>${cappedNote}<div class="q-list">${rows}</div>`, answers};
 };
 
 GENERATORS['three-size-comparison'] = (p,subIdx,qc,sid,sname) => {

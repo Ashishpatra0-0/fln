@@ -800,7 +800,7 @@ export async function generateMultiCompetencyMicroPaper({
         });
       }
 
-      parts.push({ competency, levelId, subIdx, sectionIndex, questionCount: questionsPerCompetency, questions });
+      parts.push({ competency, levelId, subIdx, sectionIndex, questionCount: questions.length, questions });
       partSectionsHtml.push(`
         <div style="font-size:16px;font-weight:800;margin:18px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--ink);">Part ${i + 1}: ${competency} · ${data.meta.title}</div>
         ${data.html}
