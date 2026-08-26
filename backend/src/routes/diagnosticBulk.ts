@@ -297,23 +297,48 @@ export function registerDiagnosticBulkRoutes(app: express.Express) {
   });
 
   // Get stored student diagnostic answer key from MongoDB
-  app.get('/api/diagnostic/student/:studentId/answer-key', async (req, res) => {
-    const user = getAuthUser(req);
-    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+    app.get('/api/diagnostic/student/:studentId/answer-key', async (req, res) => {
+      const user = getAuthUser(req);
+      if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { studentId } = req.params;
-    const { jobId } = req.query;
+      const { studentId } = req.params;
+      const { jobId } = req.query;
 
-    try {
-      const answerKey = await dbStore.getStudentDiagnosticAnswerKey(studentId, jobId as string);
-      if (!answerKey) {
-        return res.status(404).json({ error: 'Diagnostic answer key not found for this student.' });
+      try {
+        const answerKey = await dbStore.getStudentDiagnosticAnswerKey(studentId, jobId as string);
+        if (!answerKey) {
+          return res.status(404).json({ error: 'Diagnostic answer key not found for this student.' });
+        }
+        res.json(answerKey);
+      } catch (err: any) {
+        res.status(500).json({ error: err?.message || 'Failed to retrieve answer key.' });
       }
-      res.json(answerKey);
-    } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Failed to retrieve answer key.' });
-    }
-  });
+    });
+
+    // Get the most recently generated diagnostic answer key for an entire
+    // class. Used by the ICR single-sheet scan flow when no specific student
+    // is selected (e.g. a teacher scans one sheet and the OCR needs to know
+    // what the correct answers were). The class paper is shared across
+    // students up to per-student randomization, so this is a safe proxy.
+    app.get('/api/diagnostic/class/:classNumber/answer-key', async (req, res) => {
+      const user = getAuthUser(req);
+      if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+      const classNumber = parseInt(req.params.classNumber, 10);
+      if (!Number.isFinite(classNumber) || classNumber < 1) {
+        return res.status(400).json({ error: 'Invalid class number.' });
+      }
+
+      try {
+        const answerKey = await dbStore.getLatestClassAnswerKey(classNumber);
+        if (!answerKey) {
+          return res.status(404).json({ error: `No diagnostic answer key found for class ${classNumber}.` });
+        }
+        res.json(answerKey);
+      } catch (err: any) {
+        res.status(500).json({ error: err?.message || 'Failed to retrieve class answer key.' });
+      }
+    });
 
   // Generate diagnostic for a single student (enhanced with PDF download)
   app.post('/api/diagnostic/single', async (req, res) => {
