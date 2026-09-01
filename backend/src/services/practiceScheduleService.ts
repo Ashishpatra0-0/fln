@@ -2,8 +2,8 @@ import { dbStore, PracticeSchedule } from '../db';
 import { mapCompetencyToLevel, KNOWN_COMPETENCIES, getSubsCountForLevel, getNextLevelInStrand } from '../flnLevels';
 import { randomUUID } from 'crypto';
 
-// Shared practice-schedule creation and reconciliation logic, used by both
-// index.ts and routes/students.ts.
+// Shared practice-schedule creation, reconciliation, and interval-advance
+// logic, used by routes/microPractice.ts and routes/students.ts.
 
 // Normalizes a raw conceptMastery topic against the 9 known competency names:
 // exact match first, else a substring match only if unambiguous — otherwise

@@ -8,8 +8,9 @@ import { getStrandForLevel } from '../flnLevels';
 import { getOrInitPracticeSchedule, normalizeCompetencyName, calculateNextScheduleState } from '../services/practiceScheduleService';
 import { ROOT_DIR } from '../config';
 
-// Adaptive Micro-Practice & Spaced-Repetition routes, split out of index.ts
-// to match the routes/students.ts, routes/evaluation.ts, etc. pattern.
+// Adaptive Micro-Practice & Spaced-Repetition: paper generation (single-
+// competency, multi-competency, and bulk), upload/grading, and the due/
+// progress/history views that drive the teacher-facing practice workflow.
 
 // Shared logic for weak-competency lookup — used by both
 // GET /api/students/:id/weak-competencies (single-student UI lookup) and

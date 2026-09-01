@@ -251,9 +251,6 @@ async function startServer() {
   registerBestPracticeRoutes(app);
 
   // --- Adaptive Micro-Practice & Spaced-Repetition ---
-  // Routes live in routes/microPractice.ts; calculateNextScheduleState lives
-  // in services/practiceScheduleService.ts alongside the rest of the
-  // schedule logic, exported there for direct unit testing.
   registerMicroPracticeRoutes(app);
 
   // In development, serve the frontend using Vite development middleware.
