@@ -1,5 +1,5 @@
 import { dbStore, PracticeSchedule } from '../db';
-import { mapCompetencyToLevel, KNOWN_COMPETENCIES } from '../flnLevels';
+import { mapCompetencyToLevel, KNOWN_COMPETENCIES, getSubsCountForLevel, getNextLevelInStrand } from '../flnLevels';
 import { randomUUID } from 'crypto';
 
 // Shared practice-schedule creation and reconciliation logic, used by both
@@ -170,4 +170,54 @@ export async function reconcilePracticeSchedulesWithDiagnostic(
     // else: still weak, same class band — leave currentLevelId/currentSubIdx/
     // intervalDays exactly as-is; no reason to discard existing progress.
   }
+}
+
+// Interval multiplier from up to the last 3 scores (current + up to 2 prior),
+// reflecting how consistently the student has hit this tier — approximates
+// Half-Life Regression's use of practice history instead of just the latest score.
+function intervalFactorFromHistory(
+  scorePercent: number,
+  recentScorePercents: number[],
+  inTier: (p: number) => boolean
+): number {
+  const window = [scorePercent, ...recentScorePercents].slice(0, 3);
+  if (window.length < 2 || !window.every(inTier)) return 1.5;
+  return window.length >= 3 ? 3 : 2.5;
+}
+
+// Three-tier scoring against real levelId/subIdx: >=80% advances subIdx
+// (or the next strand level, or resolves if none left); 50-79% holds;
+// <50% halves the interval. Interval only grows on success, shrinks on failure, never on a hold.
+export function calculateNextScheduleState(
+  currentIntervalDays: number,
+  currentLevelId: number,
+  currentSubIdx: number,
+  correctCount: number,
+  totalCount: number,
+  recentScorePercents: number[] = []
+): { intervalDays: number; levelId: number; subIdx: number; resolved: boolean } {
+  const scorePercent = totalCount > 0 ? (correctCount / totalCount) * 100 : 0;
+
+  if (scorePercent >= 80) {
+    const factor = intervalFactorFromHistory(scorePercent, recentScorePercents, p => p >= 80);
+    const intervalDays = Math.min(30, Math.round(currentIntervalDays * factor));
+    const subsInLevel = getSubsCountForLevel(currentLevelId) ?? 1;
+
+    if (currentSubIdx + 1 < subsInLevel) {
+      return { intervalDays, levelId: currentLevelId, subIdx: currentSubIdx + 1, resolved: false };
+    }
+    const nextLevelId = getNextLevelInStrand(currentLevelId);
+    if (nextLevelId != null) {
+      return { intervalDays, levelId: nextLevelId, subIdx: 0, resolved: false };
+    }
+    return { intervalDays, levelId: currentLevelId, subIdx: currentSubIdx, resolved: true };
+  }
+
+  if (scorePercent >= 50) {
+    return { intervalDays: currentIntervalDays, levelId: currentLevelId, subIdx: currentSubIdx, resolved: false };
+  }
+
+  const factor = intervalFactorFromHistory(scorePercent, recentScorePercents, p => p < 50);
+  const intervalDays = Math.max(1, Math.round(currentIntervalDays / factor));
+  return { intervalDays, levelId: currentLevelId, subIdx: currentSubIdx, resolved: false };
 }

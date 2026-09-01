@@ -330,8 +330,8 @@ export const Layout: React.FC<LayoutProps> = ({
           <button
             onClick={() => setShowDbModal(true)}
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-mono font-bold shrink-0 cursor-pointer transition ${dbStatus?.connected
-                ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-300'
-                : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:bg-amber-950/40 dark:border-amber-800 dark:text-amber-300'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-300'
+              : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:bg-amber-950/40 dark:border-amber-800 dark:text-amber-300'
               }`}
             title="Click to view Database status and options"
           >
@@ -450,8 +450,8 @@ export const Layout: React.FC<LayoutProps> = ({
         {/* Sidebar Left panel */}
         <aside
           className={`hidden md:flex flex-col bg-white transition-all duration-300 ease-in-out shrink-0 dark:bg-slate-900 ${sidebarCollapsed
-              ? 'w-0 opacity-0 overflow-hidden border-r-0 pointer-events-none'
-              : 'w-[280px] opacity-100 border-r border-slate-200 dark:border-r dark:border-slate-700'
+            ? 'w-0 opacity-0 overflow-hidden border-r-0 pointer-events-none'
+            : 'w-[280px] opacity-100 border-r border-slate-200 dark:border-r dark:border-slate-700'
             }`}
           aria-hidden={sidebarCollapsed}
         >
@@ -498,8 +498,8 @@ export const Layout: React.FC<LayoutProps> = ({
                       <button
                         onClick={() => hasSub ? toggleSubMenu(item.name) : onSelectView(item.view)}
                         className={`flex flex-1 items-center gap-3 rounded-lg px-3 py-2.5 text-xs font-bold transition duration-150 border ${isSelected
-                            ? 'bg-indigo-700 text-white border-indigo-300 shadow-sm dark:bg-indigo-900 dark:text-indigo-200 dark:border-indigo-800'
-                            : 'text-slate-650 hover:bg-slate-100 border-transparent hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100 dark:border-transparent'
+                          ? 'bg-indigo-700 text-white border-indigo-300 shadow-sm dark:bg-indigo-900 dark:text-indigo-200 dark:border-indigo-800'
+                          : 'text-slate-650 hover:bg-slate-100 border-transparent hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100 dark:border-transparent'
                           }`}
                       >
                         <item.icon className={`h-4 w-4 ${isSelected ? 'text-indigo-200 dark:text-indigo-400' : 'text-slate-400 dark:text-slate-500'}`} />
@@ -535,8 +535,8 @@ export const Layout: React.FC<LayoutProps> = ({
                               key={sub.name}
                               onClick={() => onSelectView(sub.view)}
                               className={`flex w-full items-center gap-2 px-3 py-2 text-[11px] font-semibold rounded-md transition ${isSubSelected
-                                  ? 'text-indigo-700 bg-indigo-50/50 dark:text-indigo-400 dark:bg-indigo-950/40'
-                                  : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50 dark:text-slate-400 dark:hover:text-slate-100 dark:hover:bg-slate-800'
+                                ? 'text-indigo-700 bg-indigo-50/50 dark:text-indigo-400 dark:bg-indigo-950/40'
+                                : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50 dark:text-slate-400 dark:hover:text-slate-100 dark:hover:bg-slate-800'
                                 }`}
                             >
                               <span className="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-slate-600" />
@@ -589,8 +589,8 @@ export const Layout: React.FC<LayoutProps> = ({
                           }
                         }}
                         className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-xs font-bold border transition ${isSelected
-                            ? 'bg-primary-navy text-white border-accent-gold/30 shadow-sm dark:bg-indigo-900 dark:text-indigo-200 dark:border-indigo-800'
-                            : 'text-slate-650 hover:bg-slate-100 border-transparent dark:text-slate-400 dark:hover:bg-slate-800 dark:border-transparent'
+                          ? 'bg-primary-navy text-white border-accent-gold/30 shadow-sm dark:bg-indigo-900 dark:text-indigo-200 dark:border-indigo-800'
+                          : 'text-slate-650 hover:bg-slate-100 border-transparent dark:text-slate-400 dark:hover:bg-slate-800 dark:border-transparent'
                           }`}
                       >
                         <item.icon className="h-4 w-4 dark:text-slate-500" />
