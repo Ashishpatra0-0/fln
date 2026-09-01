@@ -15,7 +15,6 @@ import { createServer as createViteServer } from 'vite';
 import { dbStore, connectDB, UserRole, User, Student, School, Question, Worksheet, LevelWorksheet, AnswerSubmission, EvaluationReport, Ticket, LogEntry, Intervention, BestPractice, PracticeSchedule, MicroAssignment, UploadedPaper, CYCLE_NAMES } from './db';
 import { generateAIDiagnostic, evaluateAIDiagnostic, generateAIPersonalizedWorksheet, evaluateAIWorksheet } from './gemini';
 import { generateDiagnosticPaper } from './paperGenerator';
-import { generateQuestionsForLevel } from './levelGenerator';
 import { getStrandForLevel, mapCompetencyToLevel, KNOWN_COMPETENCIES, getSubsCountForLevel, getNextLevelInStrand } from './flnLevels';
 import * as levelsBackendClient from './levelsBackendClient';
 import { STATES_UTS } from './geoData';
@@ -875,59 +874,76 @@ async function startServer() {
       return res.status(403).json({ error: 'Only teachers can generate practice assignments.' });
     }
 
-    const { competency } = req.body;
+    const { competency, sectionIndex, questionCount } = req.body;
     if (!competency) return res.status(400).json({ error: 'competency is required.' });
+    if (sectionIndex == null || questionCount == null) {
+      return res.status(400).json({ error: 'sectionIndex and questionCount are required.' });
+    }
+    if (!Number.isInteger(Number(questionCount)) || Number(questionCount) < 1) {
+      return res.status(400).json({ error: 'questionCount must be a positive integer.' });
+    }
 
     const students = await dbStore.getStudents();
     const student = students.find(s => s.id === req.params.studentId);
     if (!student) return res.status(404).json({ error: 'Student not found.' });
 
-    const competencyLower = competency.toLowerCase();
-    const isMatch = (q: Question) =>
-      (q.topic || '').toLowerCase().includes(competencyLower) ||
-      competencyLower.includes((q.topic || '').toLowerCase()) ||
-      (q.subtopic || '').toLowerCase().includes(competencyLower);
-
-    const pooled: Question[] = [];
-    const seenTexts = new Set<string>();
-    const startLevel = Math.max(1, student.currentLevel - 5);
-    const endLevel = Math.min(59, student.currentLevel + 5);
-
-    for (let lvl = startLevel; lvl <= endLevel && pooled.length < 15; lvl++) {
-      for (let sub = 0; sub <= 2 && pooled.length < 15; sub++) {
-        const levelQuestions = generateQuestionsForLevel(lvl, sub);
-        for (const q of levelQuestions) {
-          if (isMatch(q) && !seenTexts.has(q.question)) {
-            pooled.push(q);
-            seenTexts.add(q.question);
-          }
-        }
-      }
+    // Resolve the student's real, adaptive Micro-Practice position for this
+    // competency — same schedule lookup /generate-pdf uses — instead of a
+    // fixed window around student.currentLevel.
+    let schedule: PracticeSchedule;
+    try {
+      schedule = await getOrInitPracticeSchedule(student.id, student.name, user.id, competency);
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message });
     }
-
-    const allQuestions = await dbStore.getQuestions();
-    for (const q of allQuestions) {
-      if (isMatch(q) && !seenTexts.has(q.question) && pooled.length < 15) {
-        pooled.push(q);
-        seenTexts.add(q.question);
-      }
+    if (schedule.resolved) {
+      return res.status(409).json({ error: `${competency} is fully mastered for this student — no further levels available.` });
     }
+    const levelId = schedule.currentLevelId!;
+    const subIdx = schedule.currentSubIdx || 0;
 
-    const matched = pooled.length > 0
-      ? pooled
-      : generateQuestionsForLevel(student.currentLevel, student.currentSubLevel || 0);
+    try {
+      const { generateMicroPracticePaper } = await import('./paperGenerator');
+      const result = await generateMicroPracticePaper({
+        studentId: student.id,
+        studentName: student.name,
+        studentClass: `${student.classGroup} - ${student.section}`,
+        levelId,
+        subIdx,
+        sectionIndex: Number(sectionIndex),
+        questionCount: Number(questionCount)
+      });
 
-    const shuffled = [...matched].sort(() => Math.random() - 0.5);
-    const selectedQuestions = shuffled.slice(0, 5);
-    if (selectedQuestions.length === 0) {
-      return res.status(400).json({ error: 'No suitable questions found for this competency.' });
+      // Persist the same MicroPracticePaper record the print flow creates, so
+      // this on-screen session's paperId is a real, later-lookup-able paper
+      // (/api/practice/paper/:paperId) rather than a dangling id.
+      await dbStore.addMicroPracticePaper({
+        id: result.paperId,
+        studentId: student.id,
+        studentName: student.name,
+        competency: getStrandForLevel(levelId),
+        levelId,
+        subIdx,
+        sectionIndex: Number(sectionIndex),
+        questionCount: result.questions.length,
+        questions: result.questions,
+        pdfUrl: result.pdfUrl,
+        createdAt: new Date().toISOString()
+      });
+
+      res.json({
+        studentId: student.id,
+        studentName: student.name,
+        competency,
+        questions: result.questions,
+        paperId: result.paperId,
+        levelId,
+        subIdx
+      });
+    } catch (err: any) {
+      console.error('Micro-practice generation failed:', err);
+      res.status(500).json({ success: false, error: err.message });
     }
-    res.json({
-      studentId: student.id,
-      studentName: student.name,
-      competency,
-      questions: selectedQuestions
-    });
   });
 
   // List practice items due today or overdue, scoped to the requesting
