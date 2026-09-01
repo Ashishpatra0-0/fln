@@ -337,3 +337,50 @@ export interface DashboardProps {
   token: string;
 }
 
+/**
+ * A Superadmin-authored instruction describing what to ask at a given level.
+ * Mirrors `QuestionLogic` in `backend/src/db.ts`.
+ */
+export interface QuestionLogic {
+  id: string;
+  level: number;
+  levelName: string;
+  skills: string[];
+  subskills: string[];
+  logicText: string;
+  taxonomy: '3-type' | '4-type';
+  createdBy: string;
+  createdByEmail: string;
+  createdAt: string;
+  updatedAt: string;
+  updatedBy: string;
+  updatedByEmail: string;
+  deletedAt: string | null;
+  deletedBy: string | null;
+}
+
+export interface QuestionLogicStats {
+  totalLogics: number;
+  totalLevels: number;
+  levelsWithLogic: number;
+}
+
+/** Payload of `GET /api/question-logics/level-map` — drives the cascading dropdowns. */
+export interface LevelMapPayload {
+  levelCount: number;
+  levels: Array<{
+    levelId: string;
+    levelNumber: number;
+    capability: string;
+    stage: string;
+    sCode: string;
+    skills: string[];
+  }>;
+  skills: Array<{
+    id: string;
+    name: string;
+    domain: string;
+    subskills: Array<{ id: string; name: string }>;
+  }>;
+}
+

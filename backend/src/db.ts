@@ -667,6 +667,101 @@ export interface MisconceptionCluster {
   updatedAt: string;
 }
 
+/**
+ * A Superadmin-authored instruction describing *what to ask* at a given level —
+ * not a question itself. One logic is the prompt the question-generation
+ * pipeline turns into many concrete `Question` rows across many worksheets.
+ *
+ * Deliberately a separate collection from `questions`: these have different
+ * authors (human vs. generator), different consumers (generation pipeline vs.
+ * renderer and ICR scanner), and different lifecycles (editable in place vs.
+ * immutable once a child has answered them). Folding them together would make
+ * one collection carry two incompatible lifecycles.
+ */
+export interface QuestionLogic {
+  id: string;
+  /** 1..LEVEL_COUNT, L-notation. Mutable — a logic filed under the wrong level can be re-tagged. */
+  level: number;
+  /** Denormalized for display so the list view needs no join. */
+  levelName: string;
+  /** At least one. Validated server-side against the level's primary+supporting skills. */
+  skills: string[];
+  /** Optional. Empty means "assess the skill at full granularity", which is a valid choice. */
+  subskills: string[];
+  logicText: string;
+  /**
+   * Which relationship taxonomy was in force when this was authored.
+   * The project is moving from the code's 4-type model to the research's
+   * 3-type model; pinning it per-document means both can coexist through the
+   * migration instead of forcing a schema break.
+   */
+  taxonomy: '3-type' | '4-type';
+  createdBy: string;
+  createdByEmail: string;
+  createdAt: string;
+  updatedAt: string;
+  updatedBy: string;
+  updatedByEmail: string;
+  /** Soft delete: the generation pipeline may already hold this id, so the row stays for audit. */
+  deletedAt: string | null;
+  deletedBy: string | null;
+}
+
+/**
+ * One row per FLN level in the canonical 93-level taxonomy.
+ *
+ * This collection exists to give the curriculum a single queryable home. Before
+ * it, the 93 levels lived only as TypeScript in the frontend package, so every
+ * backend feature that needed to reason about levels hand-authored its own copy
+ * — there were six such copies at last count, in two different id spaces.
+ *
+ * Seeded (idempotently) by `npm run seed:levels` from
+ * `frontend/src/data/skillProgressionMap.ts`. No route writes to it.
+ */
+export interface CurriculumLevel {
+  /**
+   * Canonical, immutable identity. Generated once at first insert and never
+   * regenerated — student evidence points here, so renumbering would orphan it.
+   * Every other identifier on this document is an alias of this one.
+   */
+  conceptId: string;
+
+  /** L-notation, 1..93. The alias the platform standardises on. */
+  levelNumber: number;
+  /** Research S-notation, e.g. "S4.3". */
+  sCode: string;
+  /**
+   * The retired 1..59 worksheet-engine id, where one maps.
+   *
+   * Deliberately temporary: it is the bridge that lets 59-keyed content be
+   * re-keyed by lookup rather than by hand, and lets anything still speaking
+   * 59 keep working mid-migration. Null once a level has no 59-space ancestor,
+   * and the field is dropped entirely once nothing reads it.
+   */
+  legacyLevel59: number | null;
+
+  stage: string;
+  capability: string;
+  strand: string;
+
+  /** From the skill map — a level is defined by the skills it assesses. */
+  primarySkills: string[];
+  supportingSkills: string[];
+  subskills: string[];
+
+  /**
+   * Content coverage, recomputed at every seed. These are the honest answer to
+   * "how many of the 93 can we actually render today" — false is a real gap,
+   * not a defect.
+   */
+  hasStaticHtml: boolean;
+  hasBuilder: boolean;
+
+  curriculumVersion: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface DatabaseSchema {
   users: User[];
   schools: School[];
@@ -691,6 +786,8 @@ interface DatabaseSchema {
   uploadedPapers: UploadedPaper[];
   misconceptionClusters: MisconceptionCluster[];
   testHistory: TestHistoryEntry[];
+  questionLogics: QuestionLogic[];
+  curriculumLevels: CurriculumLevel[];
 }
 
 const COLLECTION_NAMES: Record<keyof DatabaseSchema, string> = {
@@ -717,6 +814,8 @@ const COLLECTION_NAMES: Record<keyof DatabaseSchema, string> = {
   uploadedPapers: 'uploaded_papers',
   misconceptionClusters: 'misconception_clusters',
   testHistory: 'testHistory',
+  questionLogics: 'questionLogics',
+  curriculumLevels: 'curriculumLevels',
 };
 
   /**
@@ -1898,6 +1997,90 @@ const COLLECTION_NAMES: Record<keyof DatabaseSchema, string> = {
       if (idx !== -1) this.data.uploadedPapers[idx] = p;
     }
     return p || undefined;
+  }
+
+  // --- Question Logic Methods ---
+
+  /** Live logics only unless `includeDeleted`, since soft-deleted rows exist purely for audit. */
+  async getQuestionLogics(includeDeleted = false) {
+    const filter = includeDeleted ? {} : { deletedAt: null };
+    return await this.mongoDb!.collection<QuestionLogic>('questionLogics')
+      .find(filter).sort({ createdAt: -1 }).toArray();
+  }
+
+  async getQuestionLogicById(id: string) {
+    return (await this.mongoDb!.collection<QuestionLogic>('questionLogics').findOne({ id })) || undefined;
+  }
+
+  async addQuestionLogic(logic: QuestionLogic) {
+    await this.mongoDb!.collection('questionLogics').insertOne(logic);
+    if (this.data) this.data.questionLogics.push(logic);
+    return logic;
+  }
+
+  async updateQuestionLogic(id: string, updates: Partial<QuestionLogic>) {
+    await this.mongoDb!.collection('questionLogics').updateOne({ id }, { $set: updates });
+    const l = await this.mongoDb!.collection<QuestionLogic>('questionLogics').findOne({ id });
+    if (l && this.data) {
+      const idx = this.data.questionLogics.findIndex(x => x.id === id);
+      if (idx !== -1) this.data.questionLogics[idx] = l;
+    }
+    return l || undefined;
+  }
+
+  /**
+   * Counts for the header cards. `levelsWithLogic` is a distinct count over live
+   * rows — authoring five logics for one level still covers exactly one level.
+   */
+  async getQuestionLogicStats(totalLevels: number) {
+    const live = await this.mongoDb!.collection<QuestionLogic>('questionLogics')
+      .find({ deletedAt: null }).toArray();
+    return {
+      totalLogics: live.length,
+      totalLevels,
+      levelsWithLogic: new Set(live.map(l => l.level)).size,
+    };
+  }
+
+  // --- Curriculum Level Methods ---
+  //
+  // The single accessor path for curriculum data. Anything that needs to reason
+  // about levels goes through here rather than hand-authoring a lookup table —
+  // a feature that cannot get what it needs from these is a signal the schema
+  // is missing a field, not licence to start a seventh copy of the taxonomy.
+
+  async getCurriculumLevels() {
+    return await this.mongoDb!.collection<CurriculumLevel>('curriculumLevels')
+      .find({}).sort({ levelNumber: 1 }).toArray();
+  }
+
+  async getCurriculumLevel(levelNumber: number) {
+    return (await this.mongoDb!.collection<CurriculumLevel>('curriculumLevels')
+      .findOne({ levelNumber })) || undefined;
+  }
+
+  /**
+   * Resolve a retired 1..59 worksheet-engine id to its 93-space level.
+   *
+   * Exists only for the migration window: call sites that still hold a 59-space
+   * number use this to translate rather than carrying their own mapping. When
+   * the last such call site is gone, this method and `legacyLevel59` go with it.
+   */
+  async getCurriculumLevelByLegacy59(legacyLevel59: number) {
+    return (await this.mongoDb!.collection<CurriculumLevel>('curriculumLevels')
+      .findOne({ legacyLevel59 })) || undefined;
+  }
+
+  /** Coverage summary — how much of the 93 can actually be rendered today. */
+  async getCurriculumCoverage() {
+    const levels = await this.getCurriculumLevels();
+    return {
+      totalLevels: levels.length,
+      withStaticHtml: levels.filter(l => l.hasStaticHtml).length,
+      withBuilder: levels.filter(l => l.hasBuilder).length,
+      withAnyContent: levels.filter(l => l.hasStaticHtml || l.hasBuilder).length,
+      mappedFromLegacy59: levels.filter(l => l.legacyLevel59 !== null).length,
+    };
   }
 
   // --- Diagnostic Answer Key Methods ---
@@ -3821,7 +4004,14 @@ const COLLECTION_NAMES: Record<keyof DatabaseSchema, string> = {
       microPracticePapers: [],
       uploadedPapers: [],
       misconceptionClusters: [],
-      testHistory: []
+      testHistory: [],
+      // Seeded empty on purpose: question logics are pedagogy authored by a real
+      // Superadmin, and inventing demo ones would put fabricated curriculum
+      // intent in front of the question-generation pipeline.
+      questionLogics: [],
+      // Populated by `npm run seed:levels`, not by the demo seed — the
+      // curriculum is real data with one source, not fixture content.
+      curriculumLevels: []
     };
   }
 }

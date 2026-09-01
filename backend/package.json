@@ -13,6 +13,7 @@
     "test:fingerprint": "tsx src/misconceptionFingerprint.test.ts",
     "seed": "tsx src/seed.ts",
     "seed:html": "tsx src/seedLevelHtml.ts",
+    "seed:levels": "tsx src/seedCurriculumLevels.ts",
     "seed:question-bank": "tsx src/seedQuestionBank.ts",
     "seed:geo": "tsx src/utils/seedGeo.ts",
     "reseed": "tsx src/reseed.ts"

@@ -36,6 +36,7 @@ import { registerStudentRoutes } from './routes/students';
 import { registerWorksheetRoutes } from './routes/worksheets';
 import { registerEvaluationRoutes } from './routes/evaluation';
 import { registerAnalyticsRoutes } from './routes/analytics';
+import { registerQuestionLogicRoutes } from './routes/questionLogics';
 import { registerDiagnosticBulkRoutes } from './routes/diagnosticBulk';
 import { registerMisconceptionRoutes } from './routes/misconceptions';
 import { registerMicroPracticeRoutes } from './routes/microPractice';
@@ -145,6 +146,7 @@ async function startServer() {
   registerEvaluationRoutes(app);
   registerWorksheetRoutes(app);
   registerAnalyticsRoutes(app);
+  registerQuestionLogicRoutes(app);
   registerDiagnosticBulkRoutes(app);
 
   // Rasterizes an uploaded PDF to PNG so jsQR (pixel-only) can read it;
