@@ -1003,6 +1003,16 @@ export async function mergeMicroPracticePdfs(pdfFilePaths: string[]): Promise<{ 
   return { fileName, filePath, pdfUrl: `/output/${fileName}` };
 }
 
+// PNG's magic number (89 50 4E 47 ...); anything else from this pipeline is
+// JPEG. Sniffing the actual bytes rather than trusting a data URL's declared
+// MIME type is deliberate — the source of these bytes (the ICR rasterizer)
+// has drifted from PNG to JPEG output before without every caller's MIME
+// label being updated to match.
+function isPngSignature(bytes: Buffer): boolean {
+  return bytes.length >= 8 &&
+    bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47;
+}
+
 // Merges page images into one multi-page PDF, so a scanned paper spanning
 // multiple physical pages keeps every page (not just the first) for grading.
 export async function mergeImagesIntoPdf(imageDataUrls: string[]): Promise<Buffer> {
@@ -1012,7 +1022,9 @@ export async function mergeImagesIntoPdf(imageDataUrls: string[]): Promise<Buffe
   for (const dataUrl of imageDataUrls) {
     const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
     const imageBytes = Buffer.from(base64, 'base64');
-    const image = await pdfDoc.embedPng(imageBytes);
+    const image = isPngSignature(imageBytes)
+      ? await pdfDoc.embedPng(imageBytes)
+      : await pdfDoc.embedJpg(imageBytes);
     const page = pdfDoc.addPage([A4_WIDTH, A4_HEIGHT]);
     page.drawImage(image, { x: 0, y: 0, width: A4_WIDTH, height: A4_HEIGHT });
   }

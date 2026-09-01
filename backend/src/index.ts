@@ -212,8 +212,14 @@ async function startServer() {
         const pages: Array<{ output_path: string; page_number: number }> = parsed.pages || [];
         const imageDataUrls = pages.map(p => {
           pageOutputPaths.push(p.output_path);
-          const pngBuf = fs.readFileSync(p.output_path);
-          return `data:image/png;base64,${pngBuf.toString('base64')}`;
+          const imgBuf = fs.readFileSync(p.output_path);
+          // pdf_rasterize.py's --all-pages mode writes JPEG (page_N.jpg); the
+          // declared MIME here must track its actual output extension, not be
+          // assumed, so a future format change on that side can't silently
+          // mislabel bytes again.
+          const ext = path.extname(p.output_path).toLowerCase();
+          const mimeType = ext === '.png' ? 'image/png' : 'image/jpeg';
+          return `data:${mimeType};base64,${imgBuf.toString('base64')}`;
         });
         return res.json({
           success: true,

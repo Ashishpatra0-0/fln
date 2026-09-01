@@ -1029,7 +1029,7 @@ GENERATORS['compare-equal-match'] = (p,subIdx,qc,sid,sname) => {
     leftItems+=`<div class="match-item"><span class="match-label">${i+1}</span><div class="match-content">${iconRow(pair.icon,pair.count,26)}</div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
     rightItems+=`<div class="match-item"><span class="match-dot" data-omr="${qid}-rightdot"></span><div class="match-content">${iconRow(rightPair.icon,rightPair.count,26)}</div><span class="match-label">${rightLetter}</span></div>`;
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the left dot to the right dot with the same object & count`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the left dot to the right dot with the same object & count`, ICR_DETECT_MAP['match-line']));
   });
   return {
     html:`<p class="instr">Draw a line connecting each group on the left to the SAME object with the SAME number on the right. Right-hand options are labeled A, B, C...</p>
@@ -1289,7 +1289,7 @@ GENERATORS['shape-object-match'] = (p,subIdx,qc,sid,sname) => {
     const correctRightIndex = rightOrderIdx.indexOf(i);
     const correctLetter = String.fromCharCode(65 + correctRightIndex);
     leftItems += `<div class="match-item"><span class="match-label">${i+1}</span><div class="match-content">${icon(sh,54)}</div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the shape to the object with the same shape`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the shape to the object with the same shape`, ICR_DETECT_MAP['match-line']));
   });
   const qidsInOrder = answers.map(a=>a.questionId);
   let rightItems='';
@@ -1554,7 +1554,7 @@ GENERATORS['tens-units-match'] = (p,subIdx,qc,sid,sname) => {
     const qid=qidOf(qc);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:50px;height:50px;box-sizing:border-box;"><span class="match-label">${i+1}</span><div class="match-content"><b style="font-size:18px;">${num}</b></div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the number to the matching sticks group`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the number to the matching sticks group`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -2109,7 +2109,7 @@ GENERATORS['fraction-picture-match'] = (p,subIdx,qc,sid,sname) => {
     const visual = shapeType==='circle' ? fractionCircleSVG(f.den, f.num, 60) : shapeType==='square' ? fractionSquareGridSVG(f.den, f.num, 60) : fractionBarSVG(f.den, f.num, 120, 26);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:${rowH}px;height:${rowH}px;box-sizing:border-box;"><span class="match-label">${i+1}</span><div class="match-content">${visual}</div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the picture to its matching fraction`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the picture to its matching fraction`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -2213,7 +2213,7 @@ GENERATORS['fraction-identical-match'] = (p,subIdx,qc,sid,sname) => {
     const qid=qidOf(qc);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:${rowH}px;height:${rowH}px;box-sizing:border-box;"><span class="match-label">${i+1}</span><div class="match-content">${fractionCircleSVG(f.den, f.num, 60)}</div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line to the identical fraction picture`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line to the identical fraction picture`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -2280,7 +2280,7 @@ GENERATORS['fraction-half-whole-match'] = (p,subIdx,qc,sid,sname) => {
     const objVisual = it.state==='half' ? halfIconSVG(it.obj,50) : icon(it.obj,50);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:${rowH}px;height:${rowH}px;box-sizing:border-box;"><span class="match-label">${i+1}</span><div class="match-content">${objVisual}</div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the object to the circle showing the same amount (${it.state})`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the object to the circle showing the same amount (${it.state})`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -2389,7 +2389,7 @@ GENERATORS['fraction-operation-picture-match'] = (p,subIdx,qc,sid,sname) => {
     const qid=qidOf(qc);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:${rowH}px;height:${rowH}px;box-sizing:border-box;"><span class="match-label">${i+1}</span><div class="match-content" style="display:flex;align-items:center;gap:6px;">${fractionCircleSVG(it.denom,it.num1,50)}<b>${it.symbol}</b>${fractionCircleSVG(it.denom,it.num2,50)}</div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the picture operation to its correct result`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the picture operation to its correct result`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -2441,7 +2441,7 @@ GENERATORS['fraction-match-expression-picture'] = (p,subIdx,qc,sid,sname) => {
     const qid=qidOf(qc);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:${rowH}px;height:${rowH}px;box-sizing:border-box;"><span class="match-label">${i+1}</span><div class="match-content" style="display:flex;align-items:center;gap:6px;">${fractionCircleSVG(it.denom,it.num1,50)}<b>${it.symbol}</b>${fractionCircleSVG(it.denom,it.num2,50)}</div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the picture to its matching expression`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the picture to its matching expression`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -2615,7 +2615,7 @@ GENERATORS['money-match-object-price'] = (p,subIdx,qc,sid,sname) => {
     const qid=qidOf(qc);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:${rowH}px;height:${rowH}px;box-sizing:border-box;"><span class="match-label">${i+1}</span><div class="match-content">${icon(objectsUsed[i],36)}<span style="margin-left:8px;font-weight:700;">&#8377;${price}</span></div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the object/price to the matching money combination`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the object/price to the matching money combination`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -2908,7 +2908,7 @@ GENERATORS['factor-number-match'] = (p,subIdx,qc,sid,sname) => {
     const qid=qidOf(qc);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:${rowH}px;height:${rowH}px;box-sizing:border-box;"><span class="match-label">${i+1}</span><div class="match-content"><b style="font-size:18px;">${num}</b></div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the number to its correct factor list`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the number to its correct factor list`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -2994,7 +2994,7 @@ GENERATORS['multiplication-fact-match'] = (p,subIdx,qc,sid,sname) => {
     const qid=qidOf(qc);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:${rowH}px;height:${rowH}px;box-sizing:border-box;"><span class="match-label">${i+1}</span><div class="match-content"><b>${f.a} &times; ${f.b}</b></div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the multiplication fact to its correct product`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the multiplication fact to its correct product`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -3125,7 +3125,7 @@ GENERATORS['decimal-place-value-match'] = (p,subIdx,qc,sid,sname) => {
     const qid=qidOf(qc);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:${rowH}px;height:${rowH}px;box-sizing:border-box;"><span class="match-label">${i+1}</span><div class="match-content"><b style="font-size:18px;">${num.numStr}</b></div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the decimal to its correct place value chart`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the decimal to its correct place value chart`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -3209,7 +3209,7 @@ GENERATORS['decimal-picture-match'] = (p,subIdx,qc,sid,sname) => {
     const qid=qidOf(qc);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:${rowH}px;height:${rowH}px;box-sizing:border-box;"><span class="match-label">${i+1}</span><div class="match-content">${fractionBarSVG(10,v,110,24)}</div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the picture to the matching decimal`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the picture to the matching decimal`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -3239,7 +3239,7 @@ GENERATORS['money-decimal-picture-match'] = (p,subIdx,qc,sid,sname) => {
     const qid=qidOf(qc);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:${rowH}px;height:${rowH}px;box-sizing:border-box;"><span class="match-label">${i+1}</span><div class="match-content"><b style="font-size:18px;">&#8377;${v.numStr}</b></div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the amount to its matching picture`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the amount to its matching picture`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -3464,7 +3464,7 @@ GENERATORS['shape-measure-match-mixed'] = (p,subIdx,qc,sid,sname) => {
     const svg = rectDiagramSVG(it.len,it.wid,unitPx,false);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:${rowH}px;height:${rowH}px;box-sizing:border-box;overflow:visible;"><span class="match-label">${i+1}</span><div class="match-content">${svg}</div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the shape to its correct ${it.mode}`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the shape to its correct ${it.mode}`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -3730,7 +3730,7 @@ GENERATORS['angle-name-match'] = (p,subIdx,qc,sid,sname) => {
     const qid=qidOf(qc);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:${rowH}px;height:${rowH}px;box-sizing:border-box;"><span class="match-label">${i+1}</span><div class="match-content">${angleDiagramSimpleSVG(it.deg,72)}</div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the angle to its correct name`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the angle to its correct name`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -3776,7 +3776,7 @@ GENERATORS['angle-identical-match'] = (p,subIdx,qc,sid,sname) => {
     const qid=qidOf(qc);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:${rowH}px;height:${rowH}px;box-sizing:border-box;"><span class="match-label">${i+1}</span><div class="match-content">${angleDiagramSimpleSVG(d,76)}</div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the angle to the identical angle`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the angle to the identical angle`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -3940,7 +3940,7 @@ GENERATORS['symmetry-mirror-match'] = (p,subIdx,qc,sid,sname) => {
     const qid=qidOf(qc);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:${rowH}px;height:${rowH}px;box-sizing:border-box;"><span class="match-label">${i+1}</span><div class="match-content">${mirrorIconSVG(ic,false,44)}</div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the object to its correct mirror image`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the object to its correct mirror image`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -4192,7 +4192,7 @@ GENERATORS['match-hto-picture'] = (p,subIdx,qc,sid,sname) => {
     const qid=qidOf(qc);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:56px;height:56px;box-sizing:border-box;overflow:hidden;"><span class="match-label">${i+1}</span><div class="match-content">${hundredsTensOnesHtml(c.h,c.t,c.o,26)}</div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the picture blocks to the matching number`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the picture blocks to the matching number`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -4346,7 +4346,7 @@ GENERATORS['match-thousands-picture'] = (p,subIdx,qc,sid,sname) => {
     const qid=qidOf(qc);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:${rowH}px;height:${rowH}px;box-sizing:border-box;overflow:hidden;"><span class="match-label">${i+1}</span><div class="match-content">${thousandsHundredsTensOnesHtml(c.th,c.h,c.t,c.o,22)}</div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the picture blocks to the matching number`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the picture blocks to the matching number`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -4571,7 +4571,7 @@ GENERATORS['number-name-match'] = (p,subIdx,qc,sid,sname) => {
     const qid=qidOf(qc);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:44px;height:44px;box-sizing:border-box;"><span class="match-label">${i+1}</span><div class="match-content"><b style="font-size:20px;">${num}</b></div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the number to its matching number-word`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the number to its matching number-word`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -4623,7 +4623,7 @@ GENERATORS['hand-object-match'] = (p,subIdx,qc,sid,sname) => {
     const qid=qidOf(qc);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="height:${rowH}px;min-height:${rowH}px;"><span class="match-label">${i+1}</span><div class="match-content">${drawHandsForCount(c)}</div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter,`letter ${correctLetter} — draw a line from the hand gesture to the group with the same count`,ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter,`draw a line from the hand gesture to the group with the same count`,ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -4693,7 +4693,7 @@ GENERATORS['count-write-match'] = (p,subIdx,qc,sid,sname) => {
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:56px;"><span class="match-label">${i+1}</span><div class="match-content">${iconRow(leftIcon,c,24)}</div><span class="ans-box" data-omr="${qidW}-write"></span><span class="match-dot" data-omr="${qidM}-leftdot"></span></div>`;
     answers.push(makeAnsItem(qidW,sid,sname,(i*2)+1,'fill-blank',c,'count written in left box',ICR_DETECT_MAP['fill-blank']));
-    answers.push(makeAnsItem(qidM,sid,sname,(i*2)+2,'match-line',correctLetter,`letter ${correctLetter} — draw a line from left group to the matching right group`,ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qidM,sid,sname,(i*2)+2,'match-line',correctLetter,`draw a line from left group to the matching right group`,ICR_DETECT_MAP['match-line']));
   });
   let rightItems='';
   rightOrder.forEach((origIdx, k)=>{
@@ -4769,7 +4769,7 @@ GENERATORS['addition-add-and-match'] = (p,subIdx,qc,sid,sname) => {
     let a=ri(1,sum-1), b=sum-a;
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item"><span class="match-label">${i+1}</span><div class="match-content"><b>${a} + ${b}</b></div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the equation to the group with the matching total`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the equation to the group with the matching total`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -4857,7 +4857,7 @@ GENERATORS['subtraction-subtract-and-match'] = (p,subIdx,qc,sid,sname) => {
     let b=ri(1, Math.max(1,maxMinuend-diff)); let a=diff+b; if(a>maxMinuend){ a=maxMinuend; b=a-diff; }
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item"><span class="match-label">${i+1}</span><div class="match-content"><b>${a} &minus; ${b}</b></div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the equation to the group with the matching difference`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the equation to the group with the matching difference`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -5157,7 +5157,7 @@ GENERATORS['add-subtract-match-mixed'] = (p,subIdx,qc,sid,sname) => {
     const qid=qidOf(qc);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:52px;height:52px;box-sizing:border-box;"><span class="match-label">${i+1}</span><div class="match-content"><b>${row.eq}</b></div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the equation to the group with the matching total`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the equation to the group with the matching total`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -6247,7 +6247,7 @@ GENERATORS['tally-number-match'] = (p,subIdx,qc,sid,sname) => {
     const qid=qidOf(qc);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:50px;height:50px;box-sizing:border-box;"><span class="match-label">${i+1}</span><div class="match-content">${tallyMarksSVG(num,30)}</div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the tally marks to the matching number`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the tally marks to the matching number`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -6296,7 +6296,7 @@ GENERATORS['clock-time-match'] = (p,subIdx,qc,sid,sname) => {
     const qid=qidOf(qc);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:96px;height:96px;box-sizing:border-box;"><span class="match-label">${i+1}</span><div class="match-content">${drawClock(t.h,t.m)}</div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the clock to its matching time`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the clock to its matching time`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -6322,7 +6322,7 @@ GENERATORS['clock-clock-match'] = (p,subIdx,qc,sid,sname) => {
     const qid=qidOf(qc);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:${rowH}px;height:${rowH}px;box-sizing:border-box;"><span class="match-label">${i+1}</span><div class="match-content">${drawClock(t.h,t.m)}</div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the clock to the identical clock`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the clock to the identical clock`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -7276,7 +7276,7 @@ GENERATORS['map-match-directions'] = (p,subIdx,qc,sid,sname) => {
     const qid=qidOf(qc);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:${rowH}px;height:${rowH}px;box-sizing:border-box;"><span class="match-label">${i+1}</span><div class="match-content">${directionArrowHtml(d,40)}</div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the arrow to its matching direction word`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the arrow to its matching direction word`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{
@@ -7450,7 +7450,7 @@ GENERATORS['unit-object-match'] = (p,subIdx,qc,sid,sname) => {
     const qid=qidOf(qc);
     const correctLetter = String.fromCharCode(65 + rightOrder.indexOf(i));
     leftItems += `<div class="match-item" style="min-height:${rowH}px;height:${rowH}px;box-sizing:border-box;"><span class="match-label">${i+1}</span><div class="match-content">${icon(item.icon,36)}<span style="font-size:11px;margin-left:6px;">${esc(labelize(item.icon))}</span></div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
-    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `letter ${correctLetter} — draw a line from the object to its correct unit`, ICR_DETECT_MAP['match-line']));
+    answers.push(makeAnsItem(qid,sid,sname,i+1,'match-line',correctLetter, `draw a line from the object to its correct unit`, ICR_DETECT_MAP['match-line']));
   });
   const qids = answers.map(a=>a.questionId);
   rightOrder.forEach((origIdx, k)=>{

@@ -573,8 +573,13 @@ export function registerMicroPracticeRoutes(app: express.Express) {
         competency: levelId != null ? getStrandForLevel(Number(levelId)) : null
       });
     } catch (err: any) {
+      // Not every thrower here is an Error — pdf-lib's embed calls throw
+      // plain strings, which have no .message and would otherwise silently
+      // drop the error out of the JSON response, leaving the teacher with
+      // no explanation at all.
+      const message = err instanceof Error ? err.message : String(err);
       console.error('Micro-practice paper upload failed:', err);
-      res.status(500).json({ success: false, error: err.message });
+      res.status(500).json({ success: false, error: message });
     }
   });
 
