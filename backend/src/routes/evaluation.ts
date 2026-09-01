@@ -1,11 +1,14 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import { randomUUID } from 'crypto';
 import { dbStore, EvaluationReport, Student, AnswerSubmission, UserRole, CYCLE_NAMES, dedupeQuestionsById } from '../db';
 import { getAuthUser, canAccessStudent } from '../auth';
 import { evaluateAIWorksheet } from '../gemini';
 import { PYTHON_BIN, AI_SERVICES_DIR } from '../config';
+import { invalidateFingerprintCache } from './misconceptions';
+import { assignStudentToArchetype } from '../studentArchetypeService';
 import { CURRICULUM_MAPPING } from '../config/curriculumMap';
 import { directPrerequisites, describeConcept } from '../competencyPrerequisites';
 
@@ -368,7 +371,7 @@ export function registerEvaluationRoutes(app: express.Express) {
             }
             const pagePaths: string[] = pdfJson.pages.map((p: any) => p.output_path).filter(Boolean);
             // Safety caps: refuse to OCR absurdly long PDFs.
-            const MAX_PAGES = 10;
+            const MAX_PAGES = 25;
             if (pagePaths.length > MAX_PAGES) {
               try { fs.rmSync(pdfPath, { force: true }); } catch { /* noop */ }
               try { fs.rmSync(pagesDir, { recursive: true, force: true }); } catch { /* noop */ }
@@ -378,13 +381,17 @@ export function registerEvaluationRoutes(app: express.Express) {
                 }
               };
             }
-            // Read each page PNG as base64 and concatenate. Each page is
-            // 300 DPI ~1-3 MB on disk → ~1.5-4 MB base64.
+            // Read each page JPEG as base64 and concatenate. pdf_rasterize.py
+            // renders at 200 DPI / JPEG q85 (not 300 DPI lossless PNG — a real
+            // 22-page photo-like scan measured ~4.8 MB/page as PNG vs. a small
+            // fraction of that as JPEG), so real-world pages should land well
+            // under this cap; it remains as a backstop against pathological
+            // inputs, not the primary size control.
             imageBase64s = pagePaths.map((p: string) => fs.readFileSync(p).toString('base64'));
             // Safety cap on cumulative base64 size — Ollama's /api/chat
             // accepts large request bodies but we shouldn't push 50+ MB.
             const totalBase64Bytes = imageBase64s.reduce((n, s) => n + s.length, 0);
-            const MAX_TOTAL_BASE64 = 24 * 1024 * 1024; // ~24 MB base64 ≈ 18 MB binary
+            const MAX_TOTAL_BASE64 = 60 * 1024 * 1024; // ~60 MB base64 ≈ 45 MB binary — backstop, not the primary size control post-JPEG switch
             if (totalBase64Bytes > MAX_TOTAL_BASE64) {
               try { fs.rmSync(pdfPath, { force: true }); } catch { /* noop */ }
               try { fs.rmSync(pagesDir, { recursive: true, force: true }); } catch { /* noop */ }
@@ -394,8 +401,8 @@ export function registerEvaluationRoutes(app: express.Express) {
                 }
               };
             }
-            mimeUsed = 'image/png';
-            // Cleanup the per-page PNGs and the source PDF now that we
+            mimeUsed = 'image/jpeg';
+            // Cleanup the per-page JPEGs and the source PDF now that we
             // have them in memory. Done before the Ollama POST so we
             // don't leak disk if the request hangs.
             try { fs.rmSync(pdfPath, { force: true }); } catch { /* noop */ }
@@ -816,6 +823,7 @@ export function registerEvaluationRoutes(app: express.Express) {
     };
 
     await dbStore.addAnswerSubmission(submission);
+    invalidateFingerprintCache();
 
     // Save Evaluation Report
     const report: EvaluationReport = {
@@ -841,6 +849,12 @@ export function registerEvaluationRoutes(app: express.Express) {
     };
 
     await dbStore.addEvaluationReport(report);
+
+    try {
+      await assignStudentToArchetype(studentId);
+    } catch (error) {
+      console.error('[archetype] Failed to assign student to misconception archetype:', error);
+    }
 
     // If correct, update student levels
     const levelHistory = [...student.levelHistory];

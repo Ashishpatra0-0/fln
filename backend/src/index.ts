@@ -39,6 +39,7 @@ import { registerEvaluationRoutes } from './routes/evaluation';
 import { registerAnalyticsRoutes } from './routes/analytics';
 import { registerDiagnosticBulkRoutes } from './routes/diagnosticBulk';
 import { getOrInitPracticeSchedule, normalizeCompetencyName } from './services/practiceScheduleService';
+import { registerMisconceptionRoutes } from './routes/misconceptions';
 import { randomUUID } from 'crypto';
 import fs from 'fs';
 import bcrypt from 'bcrypt';
@@ -239,6 +240,10 @@ async function startServer() {
       try { fs.rmSync(pagesDir, { recursive: true, force: true }); } catch { /* noop */ }
     }
   });
+
+  // Read-only analysis over already-graded submissions: clusters a cohort on
+  // HOW its children fail rather than how much they score.
+  registerMisconceptionRoutes(app);
 
   // --- Intervention Tracking & Best Practices Repository ---
 
