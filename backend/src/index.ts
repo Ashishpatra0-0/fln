@@ -37,9 +37,12 @@ import { registerWorksheetRoutes } from './routes/worksheets';
 import { registerEvaluationRoutes } from './routes/evaluation';
 import { registerAnalyticsRoutes } from './routes/analytics';
 import { registerQuestionLogicRoutes } from './routes/questionLogics';
+import { registerQuestionTemplateRoutes } from './routes/questionTemplates';
 import { registerDiagnosticBulkRoutes } from './routes/diagnosticBulk';
 import { registerMisconceptionRoutes } from './routes/misconceptions';
 import { registerMicroPracticeRoutes } from './routes/microPractice';
+import { registerCurriculumRoutes } from './routes/curriculum';
+import { registerQuestionBankRoutes } from './routes/questionBank';
 import { randomUUID } from 'crypto';
 import fs from 'fs';
 import bcrypt from 'bcrypt';
@@ -147,6 +150,7 @@ async function startServer() {
   registerWorksheetRoutes(app);
   registerAnalyticsRoutes(app);
   registerQuestionLogicRoutes(app);
+  registerQuestionTemplateRoutes(app);
   registerDiagnosticBulkRoutes(app);
 
   // Rasterizes an uploaded PDF to PNG so jsQR (pixel-only) can read it;
@@ -251,6 +255,8 @@ async function startServer() {
   // Read-only analysis over already-graded submissions: clusters a cohort on
   // HOW its children fail rather than how much they score.
   registerMisconceptionRoutes(app);
+  registerCurriculumRoutes(app);
+  registerQuestionBankRoutes(app);
 
   // --- Intervention Tracking & Best Practices Repository ---
 

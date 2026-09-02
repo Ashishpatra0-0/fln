@@ -219,8 +219,19 @@ export interface LevelHtmlTemplate {
 }
 
 export interface QuestionBankEntry {
+  /**
+   * Stable identity, derived from (level, section, questionNumber) — verified
+   * unique across all 1202 seeded questions. Deliberately NOT derived from the
+   * question text: 314 questions share their text with another, and fixing a
+   * typo must not orphan a reviewer's mapping.
+   *
+   * This exists so review work survives a re-seed. Before it, `seedQuestionBank`
+   * did deleteMany + insertMany, so every re-seed rotated the Mongo _ids and
+   * would have silently destroyed every mapping a superadmin had made.
+   */
+  questionId: string;
+
   level: number;
-  conceptId?: string; // Immutable concept tag (S1.1 - S7.18)
   levelTitle: string;
   section: string;
   sectionType: string;
@@ -228,6 +239,28 @@ export interface QuestionBankEntry {
   questionText: string;
   answer: string;
   svgHtml: string;
+
+  // --- Review state. Written by a human, never by the seeder. ---
+
+  /** The 93-space level this question actually assesses, once a human says so. */
+  mappedLevel?: number | null;
+  /** Immutable concept tag (S1.1 - S7.18), set from the mapped level. */
+  conceptId?: string;
+  /**
+   * `untagged` — nobody has looked at it yet.
+   * `mapped`   — a human assigned it to a 93-space level.
+   * `retired`  — a human judged it not worth keeping. Kept, not deleted, so the
+   *              decision is auditable and reversible; readers must filter it out.
+   */
+  reviewStatus?: 'untagged' | 'mapped' | 'retired';
+  reviewedBy?: string;
+  reviewedAt?: string;
+  reviewNote?: string;
+}
+
+/** The one place the question identity is computed. Seeder and API must agree. */
+export function questionBankId(level: number | string, section: string, questionNumber: number | string): string {
+  return `qb_L${level}_${String(section).replace(/[^A-Za-z0-9.]+/g, '-')}_${questionNumber}`;
 }
 
 // Canonical set of assessment cycle names, used everywhere a cycle name is
@@ -708,6 +741,95 @@ export interface QuestionLogic {
 }
 
 /**
+ * A Superadmin-authored question: the stem a child reads, how the answer is
+ * recorded, and the constraints that govern the numbers inside it.
+ *
+ * Distinct from `QuestionLogic`, which described a question in prose and left
+ * the generator to interpret it. A template says the same thing in fields that
+ * can be validated, compared and bulk-imported, so two authors describing the
+ * same variation produce the same row rather than two sentences that only a
+ * human can tell apart.
+ *
+ * Addressed by `conceptId`, never by level number. Levels are insertable and
+ * re-orderable; the concept a question assesses is not. See `CurriculumLevel`.
+ */
+export interface QuestionTemplate {
+  id: string;
+
+  /** Canonical curriculum identity, e.g. "S3.4". The thing this question assesses. */
+  conceptId: string;
+  /**
+   * Display alias only, resolved from `conceptId` at write time. Never the
+   * identity: it is denormalised so the list view needs no join, and it is
+   * recomputed whenever the concept changes.
+   */
+  levelNumber: number;
+  levelName: string;
+
+  /** At least one. Validated server-side against the level's primary+supporting skills. */
+  skills: string[];
+  /** Optional. Empty means "assess the skill at full granularity", which is a valid choice. */
+  subskills: string[];
+
+  /**
+   * What the child reads. Placeholders in braces are filled by the generator
+   * from the constraints below, e.g. "{a} + {b} = ___". A stem with no
+   * placeholder is a fixed question and is equally valid.
+   */
+  stem: string;
+  /**
+   * How the answer is derived, in the same placeholder vocabulary as the stem,
+   * e.g. "{a}+{b}". Held as text rather than evaluated here: nothing in this
+   * chunk generates questions, and pinning an evaluator now would fix a choice
+   * the generator work has not made yet.
+   */
+  answerSpec: string;
+
+  // --- Structured parameters. See backend/src/types/questionTemplateParams.ts ---
+  numeralRange: string | null;
+  digitCount: string | null;
+  /** Empty means "not specified", not "any operation". */
+  operations: string[];
+  maxOperandCount: number | null;
+  carryBehavior: string | null;
+  borrowBehavior: string | null;
+  maxSumOrDifference: string | null;
+  answerType: string | null;
+  blankCount: number | null;
+  questionCount: number | null;
+  subjectCategory: string | null;
+
+  /**
+   * Human-readable name for this variation, derived from the parameters at
+   * creation. Editable afterwards, and an edit is preserved: the derivation
+   * runs again only when an author asks for it.
+   */
+  name: string;
+  /**
+   * Fingerprint of (conceptId + parameters). Two templates constraining the
+   * same thing at the same concept share a key, which is what makes duplicate
+   * variations findable. Deliberately not a unique index — two Superadmins may
+   * legitimately author the same variation with different stems.
+   */
+  variantKey: string;
+  /** Free-form author tags, lowercased and de-duplicated on write. */
+  tags: string[];
+
+  /** Where the row came from. Bulk imports are worth being able to find again. */
+  source: 'form' | 'csv';
+
+  createdBy: string;
+  createdByEmail: string;
+  createdAt: string;
+  updatedAt: string;
+  updatedBy: string;
+  updatedByEmail: string;
+  /** Soft delete: a generated paper may already cite this id, so the row stays for audit. */
+  deletedAt: string | null;
+  deletedBy: string | null;
+}
+
+/**
  * One row per FLN level in the canonical 93-level taxonomy.
  *
  * This collection exists to give the curriculum a single queryable home. Before
@@ -787,6 +909,7 @@ interface DatabaseSchema {
   misconceptionClusters: MisconceptionCluster[];
   testHistory: TestHistoryEntry[];
   questionLogics: QuestionLogic[];
+  questionTemplates: QuestionTemplate[];
   curriculumLevels: CurriculumLevel[];
 }
 
@@ -815,6 +938,7 @@ const COLLECTION_NAMES: Record<keyof DatabaseSchema, string> = {
   misconceptionClusters: 'misconception_clusters',
   testHistory: 'testHistory',
   questionLogics: 'questionLogics',
+  questionTemplates: 'questionTemplates',
   curriculumLevels: 'curriculumLevels',
 };
 
@@ -936,6 +1060,25 @@ const COLLECTION_NAMES: Record<keyof DatabaseSchema, string> = {
           console.log('Successfully ensured indexes on "users" collection');
         } catch (e: any) {
           console.warn('Failed to ensure indexes on "users" collection:', e.message);
+        }
+
+        // Ensure indexes on the authoring collections.
+        //
+        // `questionLogics` has never carried any index, including on `id`,
+        // which `getQuestionLogicById` queries by. Added here alongside the
+        // new collection rather than left for later.
+        try {
+          const logicsColl = db.collection('questionLogics');
+          await logicsColl.createIndex({ id: 1 }, { unique: true });
+
+          const templatesColl = db.collection('questionTemplates');
+          await templatesColl.createIndex({ id: 1 }, { unique: true });
+          await templatesColl.createIndex({ conceptId: 1, deletedAt: 1 });
+          await templatesColl.createIndex({ variantKey: 1, deletedAt: 1 });
+          await templatesColl.createIndex({ tags: 1, deletedAt: 1 });
+          console.log('Successfully ensured indexes on the question authoring collections');
+        } catch (e: any) {
+          console.warn('Failed to ensure indexes on the question authoring collections:', e.message);
         }
 
         // Ensure indexes on evaluationReports collection for performance
@@ -2042,12 +2185,174 @@ const COLLECTION_NAMES: Record<keyof DatabaseSchema, string> = {
     };
   }
 
+  // --- Question Template Methods ----------------------------------------
+  //
+  // Templates are addressed by `conceptId`. Nothing here takes a level number:
+  // levels are insertable and re-orderable, so a stored level number would be
+  // a reference that quietly stops meaning what it meant when it was written.
+
+  async getQuestionTemplates(includeDeleted = false) {
+    const filter = includeDeleted ? {} : { deletedAt: null };
+    return await this.mongoDb!.collection<QuestionTemplate>('questionTemplates')
+      .find(filter).sort({ createdAt: -1 }).toArray();
+  }
+
+  async getQuestionTemplateById(id: string) {
+    return (await this.mongoDb!.collection<QuestionTemplate>('questionTemplates').findOne({ id })) || undefined;
+  }
+
+  /** Live templates sharing a variant fingerprint. Drives the duplicate warning. */
+  async getQuestionTemplatesByVariantKey(variantKey: string) {
+    return await this.mongoDb!.collection<QuestionTemplate>('questionTemplates')
+      .find({ variantKey, deletedAt: null }).toArray();
+  }
+
+  async addQuestionTemplate(template: QuestionTemplate) {
+    await this.mongoDb!.collection('questionTemplates').insertOne(template);
+    if (this.data) this.data.questionTemplates.push(template);
+    return template;
+  }
+
+  /**
+   * Insert a validated batch in one round trip.
+   *
+   * Callers validate every row before calling: a CSV import that writes half a
+   * file and then rejects the rest leaves the author reconciling two states by
+   * hand, which is worse than importing nothing.
+   */
+  async addQuestionTemplates(templates: QuestionTemplate[]) {
+    if (templates.length === 0) return [];
+    await this.mongoDb!.collection('questionTemplates').insertMany(templates as any[]);
+    if (this.data) this.data.questionTemplates.push(...templates);
+    return templates;
+  }
+
+  async updateQuestionTemplate(id: string, updates: Partial<QuestionTemplate>) {
+    await this.mongoDb!.collection('questionTemplates').updateOne({ id }, { $set: updates });
+    const t = await this.mongoDb!.collection<QuestionTemplate>('questionTemplates').findOne({ id });
+    if (t && this.data) {
+      const idx = this.data.questionTemplates.findIndex(x => x.id === id);
+      if (idx !== -1) this.data.questionTemplates[idx] = t;
+    }
+    return t || undefined;
+  }
+
+  async getQuestionTemplateStats(totalLevels: number) {
+    const live = await this.mongoDb!.collection<QuestionTemplate>('questionTemplates')
+      .find({ deletedAt: null }).toArray();
+    return {
+      totalTemplates: live.length,
+      totalLevels,
+      levelsWithTemplate: new Set(live.map(t => t.conceptId)).size,
+      distinctVariants: new Set(live.map(t => t.variantKey)).size,
+    };
+  }
+
   // --- Curriculum Level Methods ---
   //
   // The single accessor path for curriculum data. Anything that needs to reason
   // about levels goes through here rather than hand-authoring a lookup table —
   // a feature that cannot get what it needs from these is a signal the schema
   // is missing a field, not licence to start a seventh copy of the taxonomy.
+
+  // --- Question bank review ---------------------------------------------
+  //
+  // The bank holds the concrete questions that already exist (levels 22-59 of
+  // the retired numbering). Mapping each one to a 93-space level is what lets
+  // the 59 space be retired WITHOUT a level-to-level crosswalk: content is
+  // addressed by the question's own tag rather than by the level it came from.
+
+  async getQuestionBank(opts: {
+    level?: number;
+    sectionType?: string;
+    status?: 'untagged' | 'mapped' | 'retired';
+    mappedLevel?: number;
+    limit?: number;
+    skip?: number;
+  } = {}) {
+    const filter: any = {};
+    if (opts.level !== undefined) filter.level = opts.level;
+    if (opts.sectionType) filter.sectionType = opts.sectionType;
+    if (opts.status) filter.reviewStatus = opts.status;
+    if (opts.mappedLevel !== undefined) filter.mappedLevel = opts.mappedLevel;
+    const coll = this.mongoDb!.collection<QuestionBankEntry>('questionBank');
+    const [items, total] = await Promise.all([
+      coll.find(filter).sort({ level: 1, section: 1, questionNumber: 1 })
+        .skip(opts.skip || 0).limit(opts.limit || 50).toArray(),
+      coll.countDocuments(filter),
+    ]);
+    return { items, total };
+  }
+
+  async getQuestionBankEntry(questionId: string) {
+    return (await this.mongoDb!.collection<QuestionBankEntry>('questionBank')
+      .findOne({ questionId })) || undefined;
+  }
+
+  /** Apply a review decision to one question. Returns the updated row. */
+  async reviewQuestion(questionId: string, patch: {
+    mappedLevel?: number | null;
+    conceptId?: string;
+    reviewStatus: 'untagged' | 'mapped' | 'retired';
+    reviewedBy: string;
+    reviewNote?: string;
+  }) {
+    const coll = this.mongoDb!.collection<QuestionBankEntry>('questionBank');
+    await coll.updateOne({ questionId }, {
+      $set: { ...patch, reviewedAt: new Date().toISOString() } as any,
+    });
+    return await this.getQuestionBankEntry(questionId);
+  }
+
+  /** Apply one decision to every question in a (level, section). */
+  async reviewQuestionsBulk(filter: { level: number; section?: string; sectionType?: string }, patch: {
+    mappedLevel?: number | null;
+    conceptId?: string;
+    reviewStatus: 'untagged' | 'mapped' | 'retired';
+    reviewedBy: string;
+  }) {
+    const q: any = { level: filter.level };
+    if (filter.section) q.section = filter.section;
+    if (filter.sectionType) q.sectionType = filter.sectionType;
+    const res = await this.mongoDb!.collection<QuestionBankEntry>('questionBank').updateMany(q, {
+      $set: { ...patch, reviewedAt: new Date().toISOString() } as any,
+    });
+    return { matched: res.matchedCount, modified: res.modifiedCount };
+  }
+
+  /**
+   * Review progress, plus the shape of the work remaining.
+   *
+   * `legacyLevelsWithoutQuestions` is the honest other half: the bank only
+   * covers levels 22-59, so those legacy levels have nothing to tag and must be
+   * mapped level-to-level instead.
+   */
+  async getQuestionBankProgress() {
+    const coll = this.mongoDb!.collection<QuestionBankEntry>('questionBank');
+    const [total, mapped, retired, untagged, levels, targets] = await Promise.all([
+      coll.countDocuments({}),
+      coll.countDocuments({ reviewStatus: 'mapped' }),
+      coll.countDocuments({ reviewStatus: 'retired' }),
+      coll.countDocuments({ reviewStatus: 'untagged' }),
+      coll.distinct('level'),
+      coll.distinct('mappedLevel', { reviewStatus: 'mapped' }),
+    ]);
+    const byLevel = await coll.aggregate([
+      { $group: {
+          _id: '$level',
+          total: { $sum: 1 },
+          mapped: { $sum: { $cond: [{ $eq: ['$reviewStatus', 'mapped'] }, 1, 0] } },
+          retired: { $sum: { $cond: [{ $eq: ['$reviewStatus', 'retired'] }, 1, 0] } },
+      } },
+      { $sort: { _id: 1 } },
+    ]).toArray();
+    return {
+      total, mapped, retired, untagged,
+      legacyLevelsInBank: levels.sort((a: number, b: number) => a - b),
+      targetLevelsCovered: (targets as (number | null)[]).filter((n): n is number => typeof n === 'number').sort((a, b) => a - b),
+      byLevel: byLevel.map((r: any) => ({ level: r._id, total: r.total, mapped: r.mapped, retired: r.retired })),
+    };
+  }
 
   async getCurriculumLevels() {
     return await this.mongoDb!.collection<CurriculumLevel>('curriculumLevels')
@@ -2057,6 +2362,12 @@ const COLLECTION_NAMES: Record<keyof DatabaseSchema, string> = {
   async getCurriculumLevel(levelNumber: number) {
     return (await this.mongoDb!.collection<CurriculumLevel>('curriculumLevels')
       .findOne({ levelNumber })) || undefined;
+  }
+
+  /** Look a level up by its permanent identity rather than by its position. */
+  async getCurriculumLevelByConceptId(conceptId: string) {
+    return (await this.mongoDb!.collection<CurriculumLevel>('curriculumLevels')
+      .findOne({ conceptId })) || undefined;
   }
 
   /**
@@ -2069,6 +2380,24 @@ const COLLECTION_NAMES: Record<keyof DatabaseSchema, string> = {
   async getCurriculumLevelByLegacy59(legacyLevel59: number) {
     return (await this.mongoDb!.collection<CurriculumLevel>('curriculumLevels')
       .findOne({ legacyLevel59 })) || undefined;
+  }
+
+  /**
+   * Point a 93-space level at a retired 1-59 level, or clear the pointer.
+   *
+   * Passing `null` as the target clears whichever level currently claims
+   * `legacyLevel59`, so a mis-mapping can be undone without knowing where it
+   * landed.
+   */
+  async setCurriculumLegacyMapping(levelNumber: number | null, legacyLevel59: number) {
+    const coll = this.mongoDb!.collection<CurriculumLevel>('curriculumLevels');
+    // Only one 93-space level may claim a given legacy id.
+    await coll.updateMany({ legacyLevel59 }, { $set: { legacyLevel59: null } });
+    if (levelNumber !== null) {
+      await coll.updateOne({ levelNumber }, {
+        $set: { legacyLevel59, updatedAt: new Date().toISOString() },
+      });
+    }
   }
 
   /** Coverage summary — how much of the 93 can actually be rendered today. */
@@ -4009,6 +4338,7 @@ const COLLECTION_NAMES: Record<keyof DatabaseSchema, string> = {
       // Superadmin, and inventing demo ones would put fabricated curriculum
       // intent in front of the question-generation pipeline.
       questionLogics: [],
+      questionTemplates: [],
       // Populated by `npm run seed:levels`, not by the demo seed — the
       // curriculum is real data with one source, not fixture content.
       curriculumLevels: []
