@@ -15,14 +15,34 @@
 
 import { createHash } from 'crypto';
 
-export const NUMERAL_RANGES = ['0-9', '0-20', '0-50', '0-100', '0-1000', '0-10000'] as const;
+/**
+ * Built-in ranges. `0-100` and `0-1000` are kept because rows already reference
+ * them: persisted data is never silently rewritten. They are reported as
+ * deprecated so the form can push authors toward the canonical set without the
+ * old values suddenly failing validation.
+ *
+ * Further ranges are added by a Superadmin at runtime and live in the
+ * `questionOptions` collection, not here.
+ */
+export const NUMERAL_RANGES = ['0-9', '0-20', '0-50', '0-100', '0-200', '0-1000', '0-2000', '0-10000'] as const;
+export const DEPRECATED_NUMERAL_RANGES: readonly string[] = ['0-100', '0-1000'];
 export const DIGIT_COUNTS = ['1-digit', '2-digit', '3-digit', '4-digit'] as const;
 export const OPERATIONS = ['add', 'subtract', 'multiply', 'divide'] as const;
 export const CARRY_BEHAVIORS = ['none', 'allowed', 'required'] as const;
 export const BORROW_BEHAVIORS = ['none', 'allowed', 'required'] as const;
-export const MAX_SUM_OR_DIFFERENCES = ['<=10', '<=20', '<=50', '<=100', '<=1000', '<=10000'] as const;
+/**
+ * Result caps, kept in step with NUMERAL_RANGES.
+ *
+ * `<=200` and `<=2000` exist because the ranges do: an author who can choose
+ * "0 to 200" for the operands and then finds the largest answer jumps from 100
+ * straight to 1,000 has been given a form that cannot express what they meant.
+ */
+export const MAX_SUM_OR_DIFFERENCES = ['<=10', '<=20', '<=50', '<=100', '<=200', '<=1000', '<=2000', '<=10000'] as const;
 export const MAX_OPERAND_COUNTS = [2, 3, 4] as const;
 export const ANSWER_TYPES = ['single-number', 'mcq-4', 'fill-blanks', 'true-false', 'matching', 'trace'] as const;
+export const QUESTION_FAMILIES = ['counting', 'operation'] as const;
+export const PARAM_MODES = ['structured', 'legacy-free-text', 'hybrid'] as const;
+
 export const SUBJECT_CATEGORIES = [
   'fruits', 'vegetables', 'animals', 'pets', 'vehicles', 'street-furniture',
   'buildings', 'clothing', 'flowers-trees', 'classroom-objects', 'mixed',
@@ -37,6 +57,13 @@ export type MaxSumOrDifference = (typeof MAX_SUM_OR_DIFFERENCES)[number];
 export type MaxOperandCount = (typeof MAX_OPERAND_COUNTS)[number];
 export type AnswerType = (typeof ANSWER_TYPES)[number];
 export type SubjectCategory = (typeof SUBJECT_CATEGORIES)[number];
+export type QuestionFamily = (typeof QUESTION_FAMILIES)[number];
+export type ParamMode = (typeof PARAM_MODES)[number];
+
+/** An intent has to say something. Short enough to be a label is not an instruction. */
+export const INTENT_MIN_CHARS = 20;
+export const INTENT_MAX_CHARS = 2000;
+export const MAX_SVG_THEMES = 12;
 
 export const BLANK_COUNT_MIN = 1;
 export const BLANK_COUNT_MAX = 6;
@@ -207,8 +234,10 @@ const RANGE_LABELS: Record<NumeralRange, string> = {
   '0-20': '0 to 20',
   '0-50': '0 to 50',
   '0-100': '0 to 100',
-  '0-1000': '0 to 1000',
-  '0-10000': '0 to 10000',
+  '0-200': '0 to 200',
+  '0-1000': '0 to 1,000',
+  '0-2000': '0 to 2,000',
+  '0-10000': '0 to 10,000',
 };
 
 const ANSWER_LABELS: Record<AnswerType, string> = {
@@ -276,9 +305,31 @@ export function variantKeyFor(conceptId: string, p: QuestionTemplateParams): str
 }
 
 /** Everything the authoring form needs to render its controls, in one call. */
+/**
+ * Validate the intent text on its own.
+ *
+ * Deliberately checks only length and that it is not a bare question. We
+ * cannot tell from text whether an intent is pedagogically good, and pretending
+ * to would give false confidence; the length floor just stops "counting" being
+ * submitted as a generation instruction.
+ */
+export function validateGenerationIntent(intent: string): string | null {
+  const text = (intent ?? '').trim();
+  if (text.length === 0) return 'A generation intent is required.';
+  if (text.length < INTENT_MIN_CHARS) {
+    return `The generation intent must be at least ${INTENT_MIN_CHARS} characters. Describe what the child does, not just the topic.`;
+  }
+  if (text.length > INTENT_MAX_CHARS) {
+    return `The generation intent must be ${INTENT_MAX_CHARS} characters or fewer.`;
+  }
+  return null;
+}
+
 export function getParamCatalog() {
   return {
     numeralRange: NUMERAL_RANGES,
+    deprecatedNumeralRange: DEPRECATED_NUMERAL_RANGES,
+    questionFamily: QUESTION_FAMILIES,
     digitCount: DIGIT_COUNTS,
     operations: OPERATIONS,
     carryBehavior: CARRY_BEHAVIORS,
@@ -289,6 +340,8 @@ export function getParamCatalog() {
     subjectCategory: SUBJECT_CATEGORIES,
     blankCount: { min: BLANK_COUNT_MIN, max: BLANK_COUNT_MAX },
     questionCount: { min: QUESTION_COUNT_MIN, max: QUESTION_COUNT_MAX, default: QUESTION_COUNT_DEFAULT },
+    generationIntent: { minChars: INTENT_MIN_CHARS, maxChars: INTENT_MAX_CHARS },
+    maxSvgThemes: MAX_SVG_THEMES,
     contextRules: {
       carryBehavior: { requiresOperation: 'add' },
       borrowBehavior: { requiresOperation: 'subtract' },

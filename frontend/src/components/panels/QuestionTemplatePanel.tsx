@@ -10,8 +10,7 @@ import type {
   ImportResult,
 } from '../../types';
 
-const MAX_STEM_CHARS = 2000;
-const MAX_ANSWER_SPEC_CHARS = 500;
+const MAX_INTENT_CHARS = 2000;
 
 const EMPTY_PARAMS: QuestionTemplateParams = {
   numeralRange: null,
@@ -53,8 +52,9 @@ export const QuestionTemplatePanel: React.FC = () => {
   const [level, setLevel] = useState<number | ''>('');
   const [skills, setSkills] = useState<string[]>([]);
   const [subskills, setSubskills] = useState<string[]>([]);
-  const [stem, setStem] = useState('');
-  const [answerSpec, setAnswerSpec] = useState('');
+  const [generationIntent, setGenerationIntent] = useState('');
+  const [questionFamily, setQuestionFamily] = useState<'counting' | 'operation'>('operation');
+  const [svgThemeIds, setSvgThemeIds] = useState<string[]>([]);
   const [params, setParams] = useState<QuestionTemplateParams>(EMPTY_PARAMS);
   const [name, setName] = useState('');
   const [tagsText, setTagsText] = useState('');
@@ -199,8 +199,9 @@ export const QuestionTemplatePanel: React.FC = () => {
     setLevel('');
     setSkills([]);
     setSubskills([]);
-    setStem('');
-    setAnswerSpec('');
+    setGenerationIntent('');
+    setQuestionFamily('operation');
+    setSvgThemeIds([]);
     setParams(EMPTY_PARAMS);
     setName('');
     setTagsText('');
@@ -213,8 +214,9 @@ export const QuestionTemplatePanel: React.FC = () => {
     setLevel(t.levelNumber);
     setSkills(t.skills);
     setSubskills(t.subskills);
-    setStem(t.stem);
-    setAnswerSpec(t.answerSpec);
+    setGenerationIntent(t.generationIntent ?? '');
+    setQuestionFamily(t.questionFamily ?? 'operation');
+    setSvgThemeIds(t.svgThemeIds ?? []);
     setParams({
       numeralRange: t.numeralRange,
       digitCount: t.digitCount,
@@ -241,7 +243,10 @@ export const QuestionTemplatePanel: React.FC = () => {
     setDuplicateWarning(null);
     if (level === '') return setFormError('Pick a level.');
     if (skills.length === 0) return setFormError('Pick at least one skill.');
-    if (!stem.trim()) return setFormError('Write the question.');
+    if (!generationIntent.trim()) return setFormError('Describe what the question should make the child do.');
+    if (questionFamily === 'counting' && svgThemeIds.length === 0) {
+      return setFormError('A counting question needs at least one visual theme, otherwise there is nothing to count.');
+    }
     if (!selectedLevel) return setFormError('That level is no longer available. Reload the page.');
 
     setSaving(true);
@@ -251,8 +256,9 @@ export const QuestionTemplatePanel: React.FC = () => {
         conceptId: selectedLevel.sCode,
         skills,
         subskills,
-        stem: stem.trim(),
-        answerSpec: answerSpec.trim(),
+        generationIntent: generationIntent.trim(),
+        questionFamily,
+        svgThemeIds,
         ...params,
         name: name.trim(),
         tags: tagsText.split(',').map(s => s.trim()).filter(Boolean),
@@ -554,21 +560,33 @@ export const QuestionTemplatePanel: React.FC = () => {
             )}
           </div>
 
-          {/* Step 4 — the question itself */}
+          {/* Step 4 — what the question should do */}
           <div>
-            <label htmlFor="qt-stem" className={labelCls}>Step 4 — The question (required)</label>
-            <textarea id="qt-stem" value={stem} rows={3} className={inputCls}
-              onChange={e => { setStem(e.target.value.slice(0, MAX_STEM_CHARS)); setFormError(null); }}
-              placeholder={'e.g. "{a} + {b} = ___"  or  "Count the apples and write how many."'} />
+            <label htmlFor="qt-intent" className={labelCls}>Step 4 — What the question should do (required)</label>
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+              This is an instruction for the generator, not a finished question. Do not write a specific
+              question or its answer: describe what the child does, and the generator writes the question
+              and works out the answer itself.
+            </p>
+            <textarea id="qt-intent" value={generationIntent} rows={4} className={inputCls}
+              onChange={e => { setGenerationIntent(e.target.value.slice(0, MAX_INTENT_CHARS)); setFormError(null); }}
+              placeholder={'e.g. "The child counts the objects shown and writes one numeral in the answer space. Use a different count each time and do not repeat the same arrangement."'} />
             <div className="mt-1 flex justify-between text-xs text-zinc-500 dark:text-zinc-400">
-              <span>Anything in braces, like {'{a}'}, is filled in from the options below. A question with no braces is a fixed question.</span>
-              <span className="tabular-nums">{stem.length} / {MAX_STEM_CHARS}</span>
+              <span>Say what the child does, what they see, and how they answer.</span>
+              <span className="tabular-nums">{generationIntent.length} / {MAX_INTENT_CHARS}</span>
             </div>
 
-            <label htmlFor="qt-answer" className={`${labelCls} mt-3 block`}>Answer (optional)</label>
-            <input id="qt-answer" value={answerSpec} className={inputCls}
-              onChange={e => { setAnswerSpec(e.target.value.slice(0, MAX_ANSWER_SPEC_CHARS)); setFormError(null); }}
-              placeholder={'e.g. "{a}+{b}"  or  "7"'} />
+            <div className="mt-3">
+              <div className={labelCls}>Kind of question</div>
+              <div className="mt-1 flex flex-wrap gap-2">
+                {(catalog?.questionFamily ?? ['counting', 'operation']).map(f => (
+                  <button key={f} type="button" onClick={() => { setQuestionFamily(f as 'counting' | 'operation'); setFormError(null); }}
+                    aria-pressed={questionFamily === f} className={chipCls(questionFamily === f)}>
+                    {f === 'counting' ? 'Counting a picture' : 'Number operation'}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
 
           {/* Step 5 — the options that govern the numbers */}
@@ -635,12 +653,32 @@ export const QuestionTemplatePanel: React.FC = () => {
               </div>
             </Group>
 
-            <Group id="subject" title="Picture theme" summary={params.subjectCategory ?? 'not set'}>
-              <EnumRow label="Theme for counting questions" values={catalog?.subjectCategory ?? []}
-                value={params.subjectCategory} onPick={v => setParam('subjectCategory', v)} />
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Chooses the picture theme. The picture library itself is not built yet, so this is recorded but not yet drawn.
-              </p>
+            <Group id="subject" title="SVG themes"
+              summary={svgThemeIds.length ? `${svgThemeIds.length} selected` : 'not set'}>
+              <div>
+                <div className={labelCls}>Visual themes this question may be drawn with</div>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {(catalog?.svgThemes ?? []).map(t => (
+                    <button key={t.id} type="button"
+                      onClick={() => {
+                        setFormError(null);
+                        setSvgThemeIds(prev => prev.includes(t.id) ? prev.filter(x => x !== t.id) : [...prev, t.id]);
+                      }}
+                      aria-pressed={svgThemeIds.includes(t.id)} className={chipCls(svgThemeIds.includes(t.id))}>
+                      {t.label} <span className="text-xs opacity-60">({t.variants.length})</span>
+                    </button>
+                  ))}
+                </div>
+                {(catalog?.svgThemes ?? []).length === 0 && (
+                  <p className="mt-1 text-sm text-amber-700 dark:text-amber-400">
+                    No themes are available. The picture library has not been deployed to this server.
+                  </p>
+                )}
+                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  Pick more than one and each paper is drawn with a different theme, without changing the
+                  question. The number in brackets is how many variants that theme has.
+                </p>
+              </div>
             </Group>
           </div>
 
@@ -785,7 +823,7 @@ export const QuestionTemplatePanel: React.FC = () => {
                 <tr className="border-b border-zinc-200 dark:border-zinc-700 text-left text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
                   <th className="py-2 pr-3 font-medium">Level</th>
                   <th className="py-2 pr-3 font-medium">Name</th>
-                  <th className="py-2 pr-3 font-medium">Question</th>
+                  <th className="py-2 pr-3 font-medium">What it asks for</th>
                   <th className="py-2 pr-3 font-medium">Skills</th>
                   <th className="py-2 pr-3 font-medium">Tags</th>
                   <th className="py-2 pr-3 font-medium">Created by</th>
@@ -801,7 +839,7 @@ export const QuestionTemplatePanel: React.FC = () => {
                     </td>
                     <td className="py-3 pr-3 text-zinc-800 dark:text-zinc-200 max-w-xs">{t.name}</td>
                     <td className="py-3 pr-3 text-zinc-700 dark:text-zinc-300 max-w-md">
-                      {t.stem.length > 70 ? `${t.stem.slice(0, 70)}…` : t.stem}
+                      {(() => { const v = t.generationIntent || t.stem || ''; return v.length > 70 ? `${v.slice(0, 70)}…` : v; })()}
                     </td>
                     <td className="py-3 pr-3 text-zinc-600 dark:text-zinc-300">{t.skills.join(', ')}</td>
                     <td className="py-3 pr-3 text-zinc-500 dark:text-zinc-400">{t.tags.length ? t.tags.join(', ') : '—'}</td>

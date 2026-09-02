@@ -6,16 +6,20 @@ import { getLevel, isSkillMappedToLevel, isSubskillUnderSkills, buildLevelMapPay
 import { getLevelForConcept } from '../config/curriculumMap';
 import {
   QuestionTemplateParams,
+  QuestionFamily,
+  ParamMode,
   coerceParams,
   validateParams,
+  validateGenerationIntent,
   deriveTemplateName,
   variantKeyFor,
   getParamCatalog,
   QUESTION_COUNT_DEFAULT,
+  QUESTION_FAMILIES,
+  MAX_SVG_THEMES,
 } from '../types/questionTemplateParams';
+import { isKnownThemeId, listThemes } from '../svgAssetCatalog';
 
-const MAX_STEM_CHARS = 2000;
-const MAX_ANSWER_SPEC_CHARS = 500;
 const MAX_NAME_CHARS = 200;
 const MAX_TAGS = 20;
 const MAX_TAG_CHARS = 40;
@@ -39,7 +43,9 @@ function validateTemplate(
   conceptId: string,
   skills: string[],
   subskills: string[],
-  stem: string,
+  generationIntent: string,
+  questionFamily: string,
+  svgThemeIds: string[],
   answerSpec: string,
   params: QuestionTemplateParams,
   tags: string[],
@@ -75,15 +81,31 @@ function validateTemplate(
     }
   }
 
-  const stemText = (stem ?? '').trim();
-  if (stemText.length === 0) return 'Question text is required.';
-  if (stemText.length > MAX_STEM_CHARS) {
-    return `Question text must be ${MAX_STEM_CHARS} characters or fewer.`;
+  const intentProblem = validateGenerationIntent(generationIntent);
+  if (intentProblem) return intentProblem;
+
+  if (!(QUESTION_FAMILIES as readonly string[]).includes(questionFamily)) {
+    return `questionFamily must be one of ${QUESTION_FAMILIES.join(', ')}.`;
   }
 
-  const answer = (answerSpec ?? '').trim();
-  if (answer.length > MAX_ANSWER_SPEC_CHARS) {
-    return `Answer must be ${MAX_ANSWER_SPEC_CHARS} characters or fewer.`;
+  // The answer is generated, never authored. Rejecting this outright rather
+  // than dropping it silently: an author who typed an answer believes it will
+  // be used, and quietly discarding it would be worse than saying no.
+  if ((answerSpec ?? '').trim().length > 0) {
+    return 'An answer cannot be authored here. The generator produces the answer from the intent and the options below.';
+  }
+
+  if (!Array.isArray(svgThemeIds)) return 'svgThemeIds must be an array.';
+  if (svgThemeIds.length > MAX_SVG_THEMES) {
+    return `At most ${MAX_SVG_THEMES} visual themes may be selected.`;
+  }
+  for (const t of svgThemeIds) {
+    if (typeof t !== 'string' || !isKnownThemeId(t)) {
+      return `Unknown visual theme "${t}".`;
+    }
+  }
+  if (questionFamily === 'counting' && svgThemeIds.length === 0) {
+    return 'A counting question needs at least one visual theme, otherwise there is nothing for the child to count.';
   }
 
   if (name.length > MAX_NAME_CHARS) {
@@ -127,8 +149,9 @@ function buildTemplate(
     conceptId: string;
     skills: string[];
     subskills: string[];
-    stem: string;
-    answerSpec: string;
+    generationIntent: string;
+    questionFamily: QuestionFamily;
+    svgThemeIds: string[];
     params: QuestionTemplateParams;
     name: string;
     tags: string[];
@@ -146,8 +169,13 @@ function buildTemplate(
     levelName: getLevel(concept.levelNumber)!.capability,
     skills: input.skills,
     subskills: input.subskills,
-    stem: input.stem.trim(),
-    answerSpec: input.answerSpec.trim(),
+    generationIntent: input.generationIntent.trim(),
+    questionFamily: input.questionFamily,
+    paramMode: 'structured',
+    svgThemeIds: input.svgThemeIds,
+    // Legacy columns stay present and empty on new rows. See QuestionTemplate.
+    stem: '',
+    answerSpec: '',
     numeralRange: params.numeralRange,
     digitCount: params.digitCount,
     operations: params.operations,
@@ -218,7 +246,7 @@ function cellOrNull(cell: string): string | null {
 }
 
 const CSV_COLUMNS = [
-  'conceptId', 'skills', 'subskills', 'stem', 'answerSpec',
+  'conceptId', 'skills', 'subskills', 'generationIntent', 'questionFamily', 'svgThemeIds',
   'numeralRange', 'digitCount', 'operations', 'maxOperandCount',
   'carryBehavior', 'borrowBehavior', 'maxSumOrDifference',
   'answerType', 'blankCount', 'questionCount', 'subjectCategory',
@@ -229,7 +257,7 @@ export function registerQuestionTemplateRoutes(app: express.Express) {
   /** The legal values and context rules the form renders itself from. */
   app.get('/api/question-templates/param-catalog', (req, res) => {
     if (!requireSuperadmin(req, res, SUBJECT)) return;
-    res.json(getParamCatalog());
+    res.json({ ...getParamCatalog(), svgThemes: listThemes() });
   });
 
   /** Levels, skills and sub-skills for the cascading pickers, in one call. */
@@ -280,17 +308,19 @@ export function registerQuestionTemplateRoutes(app: express.Express) {
     const conceptId: string = (req.body?.conceptId ?? '').trim();
     const skills: string[] = req.body?.skills ?? [];
     const subskills: string[] = req.body?.subskills ?? [];
-    const stem: string = req.body?.stem ?? '';
+    const generationIntent: string = req.body?.generationIntent ?? '';
+    const questionFamily: string = req.body?.questionFamily ?? 'operation';
+    const svgThemeIds: string[] = req.body?.svgThemeIds ?? [];
     const answerSpec: string = req.body?.answerSpec ?? '';
     const params = coerceParams(req.body);
     const tags = normalizeTags(req.body?.tags);
     const name: string = (req.body?.name ?? '').trim();
 
-    const problem = validateTemplate(conceptId, skills, subskills, stem, answerSpec, params, tags, name);
+    const problem = validateTemplate(conceptId, skills, subskills, generationIntent, questionFamily, svgThemeIds, answerSpec, params, tags, name);
     if (problem) return res.status(400).json({ error: problem });
 
     const template = buildTemplate(
-      { conceptId, skills, subskills, stem, answerSpec, params, name, tags, source: 'form' },
+      { conceptId, skills, subskills, generationIntent, questionFamily: questionFamily as QuestionFamily, svgThemeIds, params, name, tags, source: 'form' },
       user,
       new Date().toISOString()
     );
@@ -324,13 +354,17 @@ export function registerQuestionTemplateRoutes(app: express.Express) {
     const conceptId: string = (req.body?.conceptId ?? current.conceptId).trim();
     const skills: string[] = req.body?.skills ?? current.skills;
     const subskills: string[] = req.body?.subskills ?? current.subskills;
-    const stem: string = req.body?.stem ?? current.stem;
-    const answerSpec: string = req.body?.answerSpec ?? current.answerSpec;
+    const generationIntent: string = req.body?.generationIntent ?? current.generationIntent ?? '';
+    const questionFamily: string = req.body?.questionFamily ?? current.questionFamily ?? 'operation';
+    const svgThemeIds: string[] = req.body?.svgThemeIds ?? current.svgThemeIds ?? [];
+    // Never inherit a legacy answer into a structured edit: that would fail the
+    // "no authored answer" rule on a row the author did not touch.
+    const answerSpec: string = req.body?.answerSpec ?? '';
     const tags = req.body?.tags !== undefined ? normalizeTags(req.body.tags) : current.tags;
     const params = coerceParams({ ...current, ...req.body });
     const name: string = (req.body?.name ?? current.name).trim();
 
-    const problem = validateTemplate(conceptId, skills, subskills, stem, answerSpec, params, tags, name);
+    const problem = validateTemplate(conceptId, skills, subskills, generationIntent, questionFamily, svgThemeIds, answerSpec, params, tags, name);
     if (problem) {
       // Make the concept-only case actionable rather than merely rejected.
       if (req.body?.conceptId !== undefined && req.body?.skills === undefined && problem.includes('not mapped')) {
@@ -353,8 +387,10 @@ export function registerQuestionTemplateRoutes(app: express.Express) {
       levelName: getLevel(concept.levelNumber)!.capability,
       skills,
       subskills,
-      stem: stem.trim(),
-      answerSpec: answerSpec.trim(),
+      generationIntent: generationIntent.trim(),
+      questionFamily: questionFamily as QuestionFamily,
+      paramMode: 'structured' as ParamMode,
+      svgThemeIds,
       numeralRange: params.numeralRange,
       digitCount: params.digitCount,
       operations: params.operations,
@@ -442,7 +478,9 @@ export function registerQuestionTemplateRoutes(app: express.Express) {
       const conceptId = col(row, 'conceptId');
       const skills = splitList(col(row, 'skills'));
       const subskills = splitList(col(row, 'subskills'));
-      const stem = col(row, 'stem');
+      const generationIntent = col(row, 'generationIntent');
+      const questionFamily = col(row, 'questionFamily') || 'operation';
+      const svgThemeIds = splitList(col(row, 'svgThemeIds'));
       const answerSpec = col(row, 'answerSpec');
       const tags = normalizeTags(splitList(col(row, 'tags')));
       const name = col(row, 'name');
@@ -461,14 +499,14 @@ export function registerQuestionTemplateRoutes(app: express.Express) {
         subjectCategory: cellOrNull(col(row, 'subjectCategory')),
       });
 
-      const problem = validateTemplate(conceptId, skills, subskills, stem, answerSpec, params, tags, name);
+      const problem = validateTemplate(conceptId, skills, subskills, generationIntent, questionFamily, svgThemeIds, answerSpec, params, tags, name);
       if (problem) {
         errors.push({ row: rowNumber, error: problem });
         return;
       }
 
       prepared.push(buildTemplate(
-        { conceptId, skills, subskills, stem, answerSpec, params, name, tags, source: 'csv' },
+        { conceptId, skills, subskills, generationIntent, questionFamily: questionFamily as QuestionFamily, svgThemeIds, params, name, tags, source: 'csv' },
         user,
         now
       ));

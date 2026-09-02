@@ -378,7 +378,15 @@ export interface QuestionTemplate {
   levelName: string;
   skills: string[];
   subskills: string[];
+  /** What the question should make the child do. An instruction, not a finished question. */
+  generationIntent: string;
+  questionFamily: 'counting' | 'operation';
+  paramMode: 'structured' | 'legacy-free-text' | 'hybrid';
+  /** Ids into the SVG manifest. The artwork lives in files, not in the database. */
+  svgThemeIds: string[];
+  /** LEGACY, read-only. Present so pre-intent rows are not lost. */
   stem: string;
+  /** LEGACY, read-only. Structured rows never carry an authored answer. */
   answerSpec: string;
   numeralRange: string | null;
   digitCount: string | null;
@@ -434,8 +442,34 @@ export interface QuestionTemplateStats {
  * The form renders its controls from this rather than from a hardcoded list,
  * so adding a legal value later is a backend-only change.
  */
+export interface SvgTheme {
+  id: string;
+  label: string;
+  variants: Array<{ variantId: string; file: string }>;
+  supportedAnswerShapes: string[];
+  printSafe: boolean;
+  viewBox: string;
+}
+
+export interface QuestionOption {
+  id: string;
+  type: 'numeral-range' | 'operation' | 'svg-theme';
+  key: string;
+  label: string;
+  min?: number;
+  max?: number;
+  implementationStatus: 'ready' | 'not-ready';
+  active: boolean;
+  deprecated?: boolean;
+}
+
 export interface ParamCatalog {
   numeralRange: string[];
+  deprecatedNumeralRange?: string[];
+  questionFamily?: string[];
+  svgThemes?: SvgTheme[];
+  generationIntent?: { minChars: number; maxChars: number };
+  maxSvgThemes?: number;
   digitCount: string[];
   operations: string[];
   carryBehavior: string[];

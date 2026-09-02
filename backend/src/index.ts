@@ -38,6 +38,7 @@ import { registerEvaluationRoutes } from './routes/evaluation';
 import { registerAnalyticsRoutes } from './routes/analytics';
 import { registerQuestionLogicRoutes } from './routes/questionLogics';
 import { registerQuestionTemplateRoutes } from './routes/questionTemplates';
+import { registerQuestionOptionRoutes } from './routes/questionOptions';
 import { registerDiagnosticBulkRoutes } from './routes/diagnosticBulk';
 import { registerMisconceptionRoutes } from './routes/misconceptions';
 import { registerMicroPracticeRoutes } from './routes/microPractice';
@@ -151,6 +152,7 @@ async function startServer() {
   registerAnalyticsRoutes(app);
   registerQuestionLogicRoutes(app);
   registerQuestionTemplateRoutes(app);
+  registerQuestionOptionRoutes(app);
   registerDiagnosticBulkRoutes(app);
 
   // Rasterizes an uploaded PDF to PNG so jsQR (pixel-only) can read it;

@@ -772,16 +772,45 @@ export interface QuestionTemplate {
   subskills: string[];
 
   /**
-   * What the child reads. Placeholders in braces are filled by the generator
-   * from the constraints below, e.g. "{a} + {b} = ___". A stem with no
-   * placeholder is a fixed question and is equally valid.
+   * What the question should make the child do, in the author's words. This is
+   * an instruction to the generator, not a finished question: it names the
+   * learning action, the visual behaviour, and how the answer is given.
+   *
+   * Required for structured records. Deliberately never contains a specific
+   * number or object, so one intent can be rendered across every visual theme
+   * without being re-authored.
+   */
+  generationIntent: string;
+
+  /** Which family of question this intent produces. Governs how it is rendered. */
+  questionFamily: 'counting' | 'operation';
+
+  /**
+   * How this row was authored. `structured` rows carry a generationIntent and
+   * no authored answer. `legacy-free-text` rows predate that and carry a stem.
+   * Kept explicit so a migration never has to guess by sniffing empty strings.
+   */
+  paramMode: 'structured' | 'legacy-free-text' | 'hybrid';
+
+  /**
+   * Visual themes this intent may be drawn with, as ids into the SVG manifest.
+   * Plural because one counting intent should work across fruit, animals and
+   * vehicles; the renderer picks a variant per paper.
+   */
+  svgThemeIds: string[];
+
+  /**
+   * LEGACY. What the child reads, written out by hand. Retained read-only so
+   * rows authored before the intent model are not lost; new structured records
+   * leave it empty. Do not add new writers.
    */
   stem: string;
   /**
-   * How the answer is derived, in the same placeholder vocabulary as the stem,
-   * e.g. "{a}+{b}". Held as text rather than evaluated here: nothing in this
-   * chunk generates questions, and pinning an evaluator now would fix a choice
-   * the generator work has not made yet.
+   * LEGACY. A hand-authored answer. Retained for the same reason as `stem`.
+   *
+   * Structured records must not carry one: the answer is produced by the
+   * generator and lives on the generated Question as an internal answer key,
+   * never as something a Superadmin typed into the authoring form.
    */
   answerSpec: string;
 
@@ -827,6 +856,49 @@ export interface QuestionTemplate {
   /** Soft delete: a generated paper may already cite this id, so the row stays for audit. */
   deletedAt: string | null;
   deletedBy: string | null;
+}
+
+/**
+ * One selectable value in the question-authoring form: a number range, an
+ * operation, or a visual theme.
+ *
+ * These live in the database rather than in a TypeScript constant so a
+ * Superadmin can add "0 to 500" without a deploy. The catalogue, the server
+ * validation and the form all read these same rows, which is what stops a
+ * value existing in the dropdown but being rejected on save.
+ */
+export interface QuestionOption {
+  id: string;
+  type: 'numeral-range' | 'operation' | 'svg-theme';
+  /** Stable machine key, e.g. "0-500". Unique per type among active rows. */
+  key: string;
+  label: string;
+
+  /** Range bounds. Only meaningful when type is 'numeral-range'. */
+  min?: number;
+  max?: number;
+
+  /**
+   * Whether anything can actually generate with this value yet.
+   *
+   * A label in the database is not an implementation: an author can record
+   * that they want modulo questions, but the option stays out of the
+   * generation catalogue until something can produce one. This is what stops
+   * a Superadmin authoring rows that silently never generate.
+   */
+  implementationStatus: 'ready' | 'not-ready';
+
+  /** Soft delete. Values are deactivated, never removed, because rows reference them. */
+  active: boolean;
+
+  /** Marks a value we intend to retire but have not migrated off yet. */
+  deprecated?: boolean;
+
+  metadata?: Record<string, unknown>;
+
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 /**
@@ -910,6 +982,7 @@ interface DatabaseSchema {
   testHistory: TestHistoryEntry[];
   questionLogics: QuestionLogic[];
   questionTemplates: QuestionTemplate[];
+  questionOptions: QuestionOption[];
   curriculumLevels: CurriculumLevel[];
 }
 
@@ -939,6 +1012,7 @@ const COLLECTION_NAMES: Record<keyof DatabaseSchema, string> = {
   testHistory: 'testHistory',
   questionLogics: 'questionLogics',
   questionTemplates: 'questionTemplates',
+  questionOptions: 'questionOptions',
   curriculumLevels: 'curriculumLevels',
 };
 
@@ -1076,6 +1150,11 @@ const COLLECTION_NAMES: Record<keyof DatabaseSchema, string> = {
           await templatesColl.createIndex({ conceptId: 1, deletedAt: 1 });
           await templatesColl.createIndex({ variantKey: 1, deletedAt: 1 });
           await templatesColl.createIndex({ tags: 1, deletedAt: 1 });
+          await templatesColl.createIndex({ paramMode: 1, deletedAt: 1 });
+
+          const optionsColl = db.collection('questionOptions');
+          await optionsColl.createIndex({ id: 1 }, { unique: true });
+          await optionsColl.createIndex({ type: 1, active: 1 });
           console.log('Successfully ensured indexes on the question authoring collections');
         } catch (e: any) {
           console.warn('Failed to ensure indexes on the question authoring collections:', e.message);
@@ -2235,6 +2314,44 @@ const COLLECTION_NAMES: Record<keyof DatabaseSchema, string> = {
       if (idx !== -1) this.data.questionTemplates[idx] = t;
     }
     return t || undefined;
+  }
+
+  // --- Question Option Methods -------------------------------------------
+  //
+  // The catalogue of selectable values. Reads are hot (every form render) and
+  // the set is tiny, so these deliberately do no caching: correctness after a
+  // Superadmin adds a value matters more than saving a small query.
+
+  async getQuestionOptions(includeInactive = false) {
+    const filter = includeInactive ? {} : { active: true };
+    return await this.mongoDb!.collection<QuestionOption>('questionOptions')
+      .find(filter).sort({ type: 1, key: 1 }).toArray();
+  }
+
+  async getQuestionOptionById(id: string) {
+    return (await this.mongoDb!.collection<QuestionOption>('questionOptions').findOne({ id })) || undefined;
+  }
+
+  /** Active row with this (type, key), if any. Used to reject duplicate keys. */
+  async getQuestionOptionByKey(type: QuestionOption['type'], key: string) {
+    return (await this.mongoDb!.collection<QuestionOption>('questionOptions')
+      .findOne({ type, key, active: true })) || undefined;
+  }
+
+  async addQuestionOption(option: QuestionOption) {
+    await this.mongoDb!.collection('questionOptions').insertOne(option);
+    if (this.data) this.data.questionOptions.push(option);
+    return option;
+  }
+
+  async updateQuestionOption(id: string, updates: Partial<QuestionOption>) {
+    await this.mongoDb!.collection('questionOptions').updateOne({ id }, { $set: updates });
+    const o = await this.mongoDb!.collection<QuestionOption>('questionOptions').findOne({ id });
+    if (o && this.data) {
+      const idx = this.data.questionOptions.findIndex(x => x.id === id);
+      if (idx !== -1) this.data.questionOptions[idx] = o;
+    }
+    return o || undefined;
   }
 
   async getQuestionTemplateStats(totalLevels: number) {
@@ -4339,6 +4456,7 @@ const COLLECTION_NAMES: Record<keyof DatabaseSchema, string> = {
       // intent in front of the question-generation pipeline.
       questionLogics: [],
       questionTemplates: [],
+      questionOptions: [],
       // Populated by `npm run seed:levels`, not by the demo seed — the
       // curriculum is real data with one source, not fixture content.
       curriculumLevels: []
