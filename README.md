@@ -176,20 +176,13 @@ service JWTs to the browser (see
 module is wired unconditionally at boot; no feature flag, no separate
 process, no service-JWT exchange.
 
-The module needs two env vars (both required for tokenization to succeed):
+The vault requires the following configuration settings:
 
-- `MONGODB_URI` — the FLN backend's existing Mongo connection. The vault
-  reuses the same replica set; the module fails fast with
-  `VAULT_DB_REQUIRES_REPLICA_SET` (503) if pointed at a standalone
-  `mongod` because `session.withTransaction(...)` is unsupported there.
-- `LOCAL_DEV_MASTER_KEY` — base64; ≥ 32 decoded bytes. The
-  per-record DEK wrap subkey is derived from this via
-  `HKDF-SHA-256(master, salt=context, info="aadhaar-vault/dek-wrap")`.
-  Production deployments are expected to swap `LocalDevKeyManager` for a
-  real KMS provider; the port is stable.
+- `MONGODB_URI` — the FLN backend's existing Mongo connection, which must point to a MongoDB replica set (e.g. MongoDB Atlas or a local replica set). The vault reuses this connection; the module fails fast with `VAULT_DB_REQUIRES_REPLICA_SET` (503) if pointed at a standalone `mongod` because multi-document transactions (`session.withTransaction(...)`) are unsupported there.
+- `LOCAL_DEV_MASTER_KEY` — base64-encoded key with at least 32 decoded bytes (generate with `openssl rand -base64 32`). The per-record DEK wrap subkey is derived from this master key via `HKDF-SHA-256(master, salt=context, info="aadhaar-vault/dek-wrap")`. Production deployments are expected to swap `LocalDevKeyManager` for a real KMS provider; the port is stable.
+- `VAULT_ALLOW_UNSAFE_KEY_PROVIDER=true` — required in production (`NODE_ENV=production`) because the current implementation only supports the local-development key provider (`LocalDevKeyManager`). In production mode, the key provider refuses to construct unless this flag is explicitly set to `'true'` to acknowledge the risk. Note that using the local-development key provider stores the master key in process environment variables, allowing anyone with access to the process environment to derive DEKs; deployment owners must review these security implications before production use.
 
-Until both are set, `POST /api/students` and `POST /api/students/bulk-import`
-fail with `VaultError NOT_CONFIGURED` (by design — no plaintext fallback).
+Until these settings are configured, the server logs startup warnings and `POST /api/students` and `POST /api/students/bulk-import` fail with `VaultError NOT_CONFIGURED` (by design — fail-closed with no plaintext fallback).
 
 End-to-end contract is enforced by the integration test suite at
 [`backend/tests/aadhaar-hardening.test.ts`](backend/tests/aadhaar-hardening.test.ts)
