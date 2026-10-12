@@ -9,7 +9,10 @@ import { isBalvatikaStage } from './config/curriculumMap';
 import {
   MIN_ANSWER_BOX_HEIGHT_PT,
   MIN_FONT_SIZE_PT,
+  PAGE_BOTTOM_MARGIN_PT,
   QUESTIONS_PER_PAGE_MAX,
+  QUESTION_GAP_PT,
+  planQuestionPages,
 } from './config/worksheetLayoutRules';
 import { renderBatch } from './worksheetRenderer';
 import { mergeAndStamp } from './pdfMerge';
@@ -24,6 +27,11 @@ const OUTPUT_DIR = path.join(__dirname, '..', 'output');
 if (!fs.existsSync(OUTPUT_DIR)) {
   fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 }
+
+const PAGE_WIDTH = 595.28;
+const PAGE_HEIGHT = 841.89;
+/** Distance from the top of the page to the first question line. */
+const FIRST_QUESTION_TOP_OFFSET = 220;
 
 export function wrapTextToWidth(
   text: string,
@@ -692,10 +700,30 @@ export async function renderWorksheetPdf({
     const questionsPerPage = usesBalvatikaLayout ? QUESTIONS_PER_PAGE_MAX : defaultQuestionsPerPage;
     const questionFontSize = usesBalvatikaLayout ? MIN_FONT_SIZE_PT : defaultQuestionFontSize;
     const answerBoxHeight = usesBalvatikaLayout ? MIN_ANSWER_BOX_HEIGHT_PT : defaultAnswerBoxHeight;
-    const totalPages = Math.max(1, Math.ceil(swq.questions.length / questionsPerPage));
+    const maxQuestionWidth = PAGE_WIDTH - 100;
+    const lineHeight = questionFontSize * 1.3;
+    // Wrap every question first so each block's height is known. The page
+    // count then flexes with the content (OVERFLOW_POLICY): a question that
+    // does not fit in the space left goes to the next page instead of
+    // running past the footer.
+    const blocks = swq.questions.map((q, index) => {
+      const lines = wrapTextToWidth(
+        `Q${index + 1}. [${q.topic}] ${q.question}`,
+        boldFont,
+        questionFontSize,
+        maxQuestionWidth
+      );
+      return { q, lines, height: lines.length * lineHeight + answerBoxHeight };
+    });
+    const pagePlan = planQuestionPages(blocks.map(b => b.height), {
+      maxPerPage: questionsPerPage,
+      availableHeight: PAGE_HEIGHT - FIRST_QUESTION_TOP_OFFSET - PAGE_BOTTOM_MARGIN_PT,
+      gap: QUESTION_GAP_PT,
+    });
+    const totalPages = Math.max(1, pagePlan.length);
 
     for (let pageIndex = 0; pageIndex < totalPages; pageIndex++) {
-      const page = merged.addPage([595.28, 841.89]);
+      const page = merged.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
       const { width, height } = page.getSize();
 
       page.drawRectangle({
@@ -768,20 +796,11 @@ export async function renderWorksheetPdf({
       }, width - 105, height - 150, 45);
 
       // Draw student-specific personalized questions
-      let currentY = height - 220;
-      const startQuestion = pageIndex * questionsPerPage;
-      const pageQuestions = swq.questions.slice(startQuestion, startQuestion + questionsPerPage);
-      const maxQuestionWidth = width - 100;
-      const lineHeight = questionFontSize * 1.3;
+      let currentY = height - FIRST_QUESTION_TOP_OFFSET;
+      const pageBlocks = (pagePlan[pageIndex] ?? []).map(i => blocks[i]);
 
-      pageQuestions.forEach((q, idx) => {
-        const questionNumber = startQuestion + idx + 1;
-        const questionLines = wrapTextToWidth(
-          `Q${questionNumber}. [${q.topic}] ${q.question}`,
-          boldFont,
-          questionFontSize,
-          maxQuestionWidth
-        );
+      pageBlocks.forEach(block => {
+        const questionLines = block.lines;
 
         questionLines.forEach((line, lineIndex) => {
           page.drawText(line, {
@@ -805,7 +824,7 @@ export async function renderWorksheetPdf({
           borderWidth: 1,
         });
 
-        currentY -= textBlockHeight + answerBoxHeight + 30;
+        currentY -= textBlockHeight + answerBoxHeight + QUESTION_GAP_PT;
       });
 
       page.drawText(`Worksheet ID: ${worksheetId} - Page ${pageIndex + 1} of ${totalPages}`, {
