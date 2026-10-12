@@ -2070,15 +2070,15 @@ export class DBStore {
      * Updated 2026-09-18 for PR #517 (the year-before-Class-1/"Balvatika" stage
      * finalisation against NCF-FS), which added 15 nodes and moved 4 nodes into
      * Stage 3, shifting every boundary below from L28 onward. The registry is
-     * now 108 levels, not 93.
+     * now 109 levels, not 93 (L-to-S crosswalk, PR #554).
      *
-     *   Pre-school 1:            1-7
-     *   Pre-school 2:            8-17
-     *   Year before Class 1:    18-46   (was Pre-school 3, 18-27 — see curriculumMap.ts)
-     *   Class 1:                47-59
-     *   Class 2:                60-76
-     *   Class 3:                77-90
-     *   Class 4:                91-108
+     *   Pre-school 1:            1-8
+     *   Pre-school 2:            9-18
+     *   Year before Class 1:    19-46   (Pre-school 3, the Balvatika stage — see curriculumMap.ts)
+     *   Class 1:                47-60
+     *   Class 2:                61-77
+     *   Class 3:                78-91
+     *   Class 4:                92-109
      *
      * classNumber here is documented (db.ts CertificationEligibility etc.) as 2-4
      * per SRS §3 — the classNumber<=1 branch exists but Class 1 / the year-before
@@ -2086,10 +2086,10 @@ export class DBStore {
      * + teacher-observation worksheet generation for that stage is still to be built).
      */
   static classLevelRange(classNumber: number): { min: number; max: number } {
-    if (classNumber <= 1) return { min: 47, max: 59 }; // class 1
-    if (classNumber === 2) return { min: 60, max: 76 };
-    if (classNumber === 3) return { min: 77, max: 90 };
-    return { min: 91, max: 108 }; // class 4 (and any >4 default)
+    if (classNumber <= 1) return { min: 47, max: 60 }; // class 1
+    if (classNumber === 2) return { min: 61, max: 77 };
+    if (classNumber === 3) return { min: 78, max: 91 };
+    return { min: 92, max: 109 }; // class 4 (and any >4 default)
   }
 
   /**

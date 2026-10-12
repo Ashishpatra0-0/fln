@@ -18,6 +18,7 @@ import { generateStudentId } from '../idGenerator';
 // logic — see that module for the full history (FLN #458, #459). Re-exported
 // here under its original name so this file's own call site doesn't change.
 import { computeRootCauseAnalysis as readPipelineDetail } from '../rootCauseAnalysis';
+import { LEVEL_COUNT } from '../config/skillLevelMap';
 
 // ─── Response hygiene (Phase 2 hardening) ───────────────────────────────────
 // Vault references are internal-only: MongoDB and the internal Student model
@@ -628,12 +629,12 @@ export function registerStudentRoutes(app: express.Express) {
       const startLevel = (classNumber - 1) * 12 + 1;
       questions = [];
       for (let lvl = startLevel; lvl < startLevel + 8; lvl++) {
-        const lvlQuestions = await generateQuestionsForLevel(Math.min(lvl, 108), 0);
+        const lvlQuestions = await generateQuestionsForLevel(Math.min(lvl, LEVEL_COUNT), 0);
         lvlQuestions.forEach(q => {
           questions.push({
             ...q,
             question_id: `DIAG_${lvl}_${q.question_id}`,
-            source_level: Math.min(lvl, 108)
+            source_level: Math.min(lvl, LEVEL_COUNT)
           });
         });
       }
