@@ -845,6 +845,16 @@ export interface QuestionLogic {
 }
 
 /**
+ * Approval states for a question template, per #451's propose/approve
+ * vocabulary — declared here (rather than only in the workflow issue) because
+ * #486's generation gate already needs a closed set to test membership
+ * against, and two spellings of the same four states would be a bug nobody
+ * notices until a row is stranded between them.
+ */
+export const QUESTION_TEMPLATE_STATUSES = ['draft', 'pendingApproval', 'approved', 'rejected'] as const;
+export type QuestionTemplateStatus = (typeof QUESTION_TEMPLATE_STATUSES)[number];
+
+/**
  * A Superadmin-authored question: the stem a child reads, how the answer is
  * recorded, and the constraints that govern the numbers inside it.
  *
@@ -886,6 +896,16 @@ export interface QuestionTemplate {
    * `'observed'`/`'both'` are opt-in on new rows, not inferred.
    */
   assessmentMode: 'written' | 'observed' | 'both';
+
+  /**
+   * Approval state for generation. Reuses #451's vocabulary so the
+   * propose/approve workflow lands on this field instead of a second one.
+   *
+   * `undefined` (every row written before this field existed) is read as
+   * `'approved'` by `isApprovedForGeneration` — see that function for why
+   * defaulting to approved is the safe reading rather than an oversight.
+   */
+  status?: QuestionTemplateStatus;
 
   /**
    * What the question should make the child do, in the author's words. This is
