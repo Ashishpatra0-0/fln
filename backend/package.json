@@ -39,6 +39,7 @@
     "test:error-tags": "tsx src/__checks__/errorTags.check.ts",
     "test:attempts": "tsx --test tests/attempt-records.test.ts",
     "test:class-level-range": "tsx --test tests/class-level-range.test.ts",
+    "test:scan-answer-keys": "tsx --test tests/scan-answer-keys.test.ts",
     "test:template-renderer": "tsx src/services/questionTemplateRenderer.test.ts",
     "test:evaluation-override": "tsx --test tests/evaluation-override.test.ts"
   },
