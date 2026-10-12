@@ -218,7 +218,7 @@ export function runQuestionBankAudit(questions: any[]): AuditResult {
       }
     }
 
-    // 5. Invalid FLN Level (valid range is 1–93)
+    // 5. Invalid FLN Level (valid range is 1–MAX_FLN_LEVEL)
     const level = extractQuestionLevel(q);
     if (
       level === null ||
