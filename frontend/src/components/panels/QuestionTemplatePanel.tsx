@@ -9,6 +9,12 @@ import type {
   ParamCatalog,
   ImportResult,
 } from '../../types';
+import {
+  QUESTION_FAMILIES,
+  QUESTION_FAMILY_LABELS,
+  isQuestionFamily,
+  type QuestionFamily,
+} from '../../utils/questionFamily';
 
 const MAX_INTENT_CHARS = 2000;
 
@@ -53,7 +59,7 @@ export const QuestionTemplatePanel: React.FC = () => {
   const [skills, setSkills] = useState<string[]>([]);
   const [subskills, setSubskills] = useState<string[]>([]);
   const [generationIntent, setGenerationIntent] = useState('');
-  const [questionFamily, setQuestionFamily] = useState<'counting' | 'operation'>('operation');
+  const [questionFamily, setQuestionFamily] = useState<QuestionFamily>('operation');
   const [assessmentMode, setAssessmentMode] = useState<'written' | 'observed' | 'both'>('written');
   const [svgThemeIds, setSvgThemeIds] = useState<string[]>([]);
   const [params, setParams] = useState<QuestionTemplateParams>(EMPTY_PARAMS);
@@ -164,8 +170,8 @@ export const QuestionTemplatePanel: React.FC = () => {
   const isFillBlanks = params.answerType === 'fill-blanks';
   const isNumberFamily = questionFamily === 'operation' || questionFamily === 'counting';
 
-  const handleQuestionFamilyChange = (nextFamily: string) => {
-    setQuestionFamily(nextFamily as any);
+  const handleQuestionFamilyChange = (nextFamily: QuestionFamily) => {
+    setQuestionFamily(nextFamily);
     setFormError(null);
     const isNum = nextFamily === 'operation' || nextFamily === 'counting';
     if (!isNum) {
@@ -639,10 +645,10 @@ export const QuestionTemplatePanel: React.FC = () => {
               <div>
                 <div className={labelCls}>Kind of question</div>
                 <div className="mt-1 flex flex-wrap gap-2">
-                  {(catalog?.questionFamily ?? ['counting', 'operation']).map(f => (
+                  {(catalog?.questionFamily?.filter(isQuestionFamily) ?? QUESTION_FAMILIES).map(f => (
                     <button key={f} type="button" onClick={() => handleQuestionFamilyChange(f)}
                       aria-pressed={questionFamily === f} className={chipCls(questionFamily === f)}>
-                      {f === 'counting' ? 'Counting a picture' : f === 'operation' ? 'Number operation' : f}
+                      {QUESTION_FAMILY_LABELS[f]}
                     </button>
                   ))}
                 </div>
