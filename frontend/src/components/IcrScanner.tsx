@@ -1,4 +1,3 @@
-import { LEVEL_SKILL_MAP } from '../data/skillProgressionMap';
 import { apiFetch } from '../services/apiClient';
 import React, { useState, useEffect } from 'react';
 import { Student, ClassGroup, EvaluationReport, User } from '../types';
