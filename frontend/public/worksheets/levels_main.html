@@ -4730,15 +4730,15 @@ GENERATORS['hand-number-mini-panels'] = (p,subIdx,qc,sid,sname) => {
     let counts=[]; while(counts.length<rowsPerPanel){ const x=ri(1,10); if(!counts.includes(x)) counts.push(x); }
     const rightOrder = shuffle(counts.map((_,i)=>i));
     let leftItems='', rightItems='', panelQids=[];
-    counts.forEach((c)=>{
+    counts.forEach((c,i)=>{
       const qid=qidOf(qc);
-      leftItems += `<div class="match-item" style="height:${rowH}px;min-height:${rowH}px;"><div class="match-content">${drawHandFingers(Math.min(c,5))}${c>5?drawHandFingers(c-5):''}</div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
+      leftItems += `<div class="match-item" style="height:${rowH}px;min-height:${rowH}px;"><span class="match-label">${i+1}</span><div class="match-content">${drawHandFingers(Math.min(c,5))}${c>5?drawHandFingers(c-5):''}</div><span class="match-dot" data-omr="${qid}-leftdot"></span></div>`;
       panelQids.push(qid);
     });
     rightOrder.forEach((origIdx,pos)=>{
       const c = counts[origIdx], qid = panelQids[origIdx];
       const color = NUM_COLORS[pos % NUM_COLORS.length];
-      rightItems += `<div class="match-item" style="height:${rowH}px;min-height:${rowH}px;"><span class="match-dot" data-omr="${qid}-rightdot"></span><div class="match-content" style="color:${color};font-weight:700;font-size:18px;">${c}</div></div>`;
+      rightItems += `<div class="match-item" style="height:${rowH}px;min-height:${rowH}px;"><span class="match-dot" data-omr="${qid}-rightdot"></span><div class="match-content" style="color:${color};font-weight:700;font-size:18px;">${c}</div><span class="match-label">${String.fromCharCode(65 + pos)}</span></div>`;
     });
     counts.forEach((c,i)=>{
       const qid = panelQids[i];
